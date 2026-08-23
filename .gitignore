@@ -30,6 +30,7 @@ pip-wheel-metadata/
 # Python / Conda 虚拟环境
 # ==================================================
 .venv/
+.venv-mujoco/
 venv/
 env/
 !plane/wheel_legged_gym/rsl_rl/env/

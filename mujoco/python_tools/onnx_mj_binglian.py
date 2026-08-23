@@ -396,6 +396,8 @@ class BinglianRuntime:
         self.args = args
         self.command_state = command_state
         self.m = mujoco.MjModel.from_xml_path(args.xml)
+        self.sim_dt = float(args.sim_dt)
+        self.m.opt.timestep = self.sim_dt
         self.d = mujoco.MjData(self.m)
         mujoco.mj_forward(self.m, self.d)
 
@@ -421,7 +423,6 @@ class BinglianRuntime:
         self.history: Optional[np.ndarray] = None
         self.last_actions = np.zeros((6,), dtype=np.float32)
 
-        self.sim_dt = float(args.sim_dt)
         self.steps_per_policy = max(1, int(round(args.policy_dt / self.sim_dt)))
         self.eff_policy_dt = self.steps_per_policy * self.sim_dt
         self.vel_last_pos: Optional[np.ndarray] = None
@@ -793,6 +794,7 @@ class BinglianRuntime:
             with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
                 self.configure_camera(viewer)
                 while viewer.is_running() and self.command_state.running:
+                    loop_start = time.perf_counter()
                     self.handle_policy_requests()
                     self.handle_temporary_policy_return()
                     self.command_state.update_ramp(self.eff_policy_dt, self.args.cmd_ramp_time)
@@ -803,7 +805,6 @@ class BinglianRuntime:
 
                     q_step, qd_step = q, qd
                     for step_idx in range(self.steps_per_policy):
-                        time.sleep(self.sim_dt*2)
                         ctrl = self.compute_control(actions, q_step, qd_step)
                         self.apply_ctrl(ctrl)
                         mujoco.mj_step(self.m, self.d)
@@ -812,6 +813,9 @@ class BinglianRuntime:
 
                     self.update_camera(viewer)
                     viewer.sync()
+                    remaining = self.eff_policy_dt - (time.perf_counter() - loop_start)
+                    if remaining > 0.0:
+                        time.sleep(remaining)
         finally:
             listener.stop()
 
