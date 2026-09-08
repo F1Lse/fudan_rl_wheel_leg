@@ -99,7 +99,8 @@ class LeggedRobotCfg(BaseConfig):
         class ranges:
             lin_vel_x = [-2.0, 2.0]  # min max [m/s]
             ang_vel_yaw = [-2, 2]  # min max [rad/s]
-            height = [0.10, 0.20]
+            # Long-leg policy: avoid rewarding a low kneeling posture.
+            height = [0.22, 0.26]
             heading = [-3.14, 3.14]
 
     class init_state:

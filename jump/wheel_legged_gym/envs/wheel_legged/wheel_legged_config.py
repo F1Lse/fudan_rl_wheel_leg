@@ -45,7 +45,8 @@ class WheelLeggedCfg(LeggedRobotCfg):
         #                         "rf1_Joint": 0.65, 
         #                         "r_wheel_Joint": 0.0, 
         #                         }
-        pos = [0.0, 0.0, 0.2]  # x,y,z [m]
+        # The shared long-leg URDF needs this clearance in the default pose.
+        pos = [0.0, 0.0, 0.30]  # x,y,z [m]
         default_joint_angles = { "lf0_Joint": 0.2, 
                                 "lf1_Joint": 0.4, 
                                 "l_wheel_Joint": 0.0, 

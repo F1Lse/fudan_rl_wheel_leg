@@ -1437,7 +1437,9 @@ class LeggedRobot(BaseTask):
             env_handle = self.gym.create_env(
                 self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs))
             )
+            # Match reset semantics: terrain origin + configured spawn offset.
             pos = self.env_origins[i].clone()
+            pos += self.base_init_state[:3]
             pos[:2] += torch_rand_float(-1.0, 1.0, (2, 1), device=self.device).squeeze(
                 1
             )

@@ -45,7 +45,9 @@ class WheelLeggedCfg(LeggedRobotCfg):
         #                         "rf1_Joint": 0.65, 
         #                         "r_wheel_Joint": 0.0, 
         #                         }
-        pos = [0.0, 0.0, 0.1]  # x,y,z [m]
+        # The lowest collision geometry is about 0.244 m below the root in the
+        # default pose. Keep a small clearance so resets do not start in contact.
+        pos = [0.0, 0.0, 0.30]  # x,y,z [m]
         default_joint_angles = { "lf0_Joint": 0.2, 
                                 "lf1_Joint": 0.4, 
                                 "l_wheel_Joint": 0.0, 
@@ -77,8 +79,11 @@ class WheelLeggedCfg(LeggedRobotCfg):
         # l2 = 0.258 旧车的
         l1 = 0.21
         l2 = 0.25
-        penalize_contacts_on = []
-        terminate_after_contacts_on = []
+        # Wheels are the intended ground contacts. Discourage the policy from
+        # finding a stable kneeling solution and terminate sustained base contact.
+        foot_name = "wheel"
+        penalize_contacts_on = ["base_link", "f0_Link", "f1_Link"]
+        terminate_after_contacts_on = ["base_link"]
         self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
 

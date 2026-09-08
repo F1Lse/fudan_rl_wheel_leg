@@ -5,6 +5,7 @@ import os
 import numpy as np
 
 import isaacgym
+from isaacgym import gymtorch
 import torch
 
 from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR
@@ -35,6 +36,7 @@ HEIGHT_STEP = 0.02
 # Initial viewer camera. Applied once after the environments are created.
 INITIAL_CAMERA_POSITION = [20.0, -20.0, 10.0]
 INITIAL_CAMERA_LOOK_AT = [20.0, 40.0, 0.0]
+PLAY_SPAWN_Z = 0.28
 
 
 
@@ -157,6 +159,29 @@ def apply_manual_commands(env, env_cfg):
     env.commands[jump_ids, 3] = env_cfg.commands.jump_ramp_heading
 
 
+def apply_play_spawn_pose(env):
+    """Place every play actor above its terrain before the first physics step."""
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+    env.root_states[env_ids] = env.base_init_state
+    env.root_states[env_ids, :3] += env.env_origins[env_ids]
+    env.root_states[env_ids, 7:13] = 0.0
+
+    env_ids_int32 = env_ids.to(dtype=torch.int32)
+    env.gym.set_actor_root_state_tensor_indexed(
+        env.sim,
+        gymtorch.unwrap_tensor(env.root_states),
+        gymtorch.unwrap_tensor(env_ids_int32),
+        len(env_ids_int32),
+    )
+    env.gym.refresh_actor_root_state_tensor(env.sim)
+
+    # Avoid interpreting the one-time placement as a large initial velocity.
+    if hasattr(env, "last_base_position"):
+        env.last_base_position[:] = env.root_states[:, :3]
+    if hasattr(env, "last_root_vel"):
+        env.last_root_vel[:] = env.root_states[:, 7:13]
+
+
 def play(args):
     global running
 
@@ -176,6 +201,7 @@ def play(args):
     listener.start()
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
+    env_cfg.init_state.pos[2] = PLAY_SPAWN_Z
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
     env_cfg.env.episode_length_s = 20
     env_cfg.terrain.num_rows = 5
@@ -192,6 +218,8 @@ def play(args):
     env_cfg.terrain.curriculum = True
 
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    apply_play_spawn_pose(env)
+    print(f"[PLAY] spawn height: z={PLAY_SPAWN_Z:.3f} m above terrain origin")
     if getattr(env, "viewer", None) is not None:
         env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
 
