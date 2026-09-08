@@ -99,8 +99,9 @@ class LeggedRobotCfg(BaseConfig):
         class ranges:
             lin_vel_x = [-2.0, 2.0]  # min max [m/s]
             ang_vel_yaw = [-2, 2]  # min max [rad/s]
-            # Long-leg policy: avoid rewarding a low kneeling posture.
-            height = [0.22, 0.26]
+            # First height-tracking stage. Contact constraints prevent the old
+            # low-height command range from being satisfied by kneeling.
+            height = [0.10, 0.20]
             heading = [-3.14, 3.14]
 
     class init_state:
@@ -189,7 +190,10 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel_enhance = 1.0
 
             # theta0_equ_0 = 0.4
-            base_height = 1.0
+            # Use the L1-error branch in _reward_base_height. The previous
+            # positive exponential reward was effectively zero when the policy
+            # settled near 0.10 m, far from the 0.22-0.26 m command range.
+            base_height = -5.0
             nominal_state = -1.0
             lin_vel_z = -1.0
             ang_vel_xy = -0.20 #-0.05
