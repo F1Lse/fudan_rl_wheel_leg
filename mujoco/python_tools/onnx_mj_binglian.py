@@ -21,7 +21,9 @@ def resource_path(relative_path: str) -> str:
     return str(MUJOCO_ROOT / relative_path)
 
 
-DEFAULT_XML_PATH = resource_path("assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel.xml")
+DEFAULT_XML_PATH = resource_path(
+    "assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel_long_legs_24kg.xml"
+)
 
 JUMP_ONNX_PATH = resource_path("actor/yuntai/p60.50.2把urdf中力矩限制为50.onnx")
 
@@ -105,9 +107,12 @@ CMD_RAMP_TIME = 0.5
 
 LEFT_GAS_SPRING_ACTUATOR_NAME = "Left_loop1_motor"
 RIGHT_GAS_SPRING_ACTUATOR_NAME = "Right_loop1_motor"
-LEFT_GAS_SPRING_CTRL  = 300.0
-RIGHT_GAS_SPRING_CTRL = 300.0
-GAS_SPRING_FORCE = RIGHT_GAS_SPRING_CTRL * 1.23
+GAS_SPRING_RATED_FORCE = 450.0
+LEFT_GAS_SPRING_CTRL = GAS_SPRING_RATED_FORCE
+RIGHT_GAS_SPRING_CTRL = GAS_SPRING_RATED_FORCE
+# The deployment controller used 370.1 for the original 300 N spring.
+# Preserve that calibrated conversion when scaling the spring to 450 N.
+GAS_SPRING_FORCE = 370.1 * (GAS_SPRING_RATED_FORCE / 300.0)
 
 
 def fit_vector(vec: np.ndarray, dim: int) -> np.ndarray:
@@ -267,6 +272,7 @@ class CommandState:
     requested_policy_duration_s: Optional[float] = None
     jump_policy_duration_s: float = JUMP_POLICY_DURATION_S
     torque_enabled: bool = True
+    print_joint_snapshot_requested: bool = False
 
     def __post_init__(self) -> None:
         if self.pressed_keys is None:
@@ -308,6 +314,8 @@ class CommandState:
         elif name == "b":
             self.torque_enabled = not self.torque_enabled
             print(f"[TORQUE] {'ON' if self.torque_enabled else 'OFF'}")
+        elif name == "p":
+            self.print_joint_snapshot_requested = True
         return None
 
     def on_release(self, key: Any) -> None:
@@ -366,6 +374,8 @@ class CommandState:
                 return str(vk - 96)
             if vk == 66:
                 return "b"
+            if vk == 80:
+                return "p"
         return None
 
 
@@ -435,7 +445,7 @@ class BinglianRuntime:
         print(f"[POLICY] {self.active_policy_name}: {self.active_policy_path}")
         print(f"[POLICY] jump: {RUNTIME_PRESETS[JUMP_POLICY_NAME]['onnx_path']} duration={self.command_state.jump_policy_duration_s:.3f}s")
         print(f"[CMD] ramp_time={args.cmd_ramp_time:.3f}s")
-        print("[KEY] Space jump, 1 forward, 2 backward, 3 left, 4 right, 5 high, 6 low, Esc quit")
+        print("[KEY] Space jump, 1 forward, 2 backward, 3 left, 4 right, 5 high, 6 low, P joint snapshot, Esc quit")
 
     def switch_policy(self, policy_name: str) -> None:
         preset = RUNTIME_PRESETS[policy_name]
@@ -613,6 +623,96 @@ class BinglianRuntime:
         projected_g = quat_rotate_inverse_xyzw(q_xyzw, self.g_world)
         return base_ang, projected_g, q, qd
 
+    def print_joint_snapshot(
+        self,
+        policy_q: np.ndarray,
+        policy_qd: np.ndarray,
+        actions: np.ndarray,
+        ctrl: dict[str, float | np.ndarray],
+    ) -> None:
+        """Print one exact MuJoCo-to-policy state and action snapshot."""
+        raw_sensor_q = self.read_dof_pos()
+        raw_sensor_qd = np.array(
+            [float(self.get_sensor(f"{dof_name}_v")[0]) for dof_name in DOF_NAMES],
+            dtype=np.float32,
+        )
+        raw_qpos = np.zeros((len(DOF_NAMES),), dtype=np.float64)
+        xml_qpos0 = np.zeros((len(DOF_NAMES),), dtype=np.float64)
+
+        for i, joint_name in enumerate(DOF_NAMES):
+            joint_id = mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            if joint_id < 0:
+                raw_qpos[i] = np.nan
+                xml_qpos0[i] = np.nan
+                continue
+            qpos_adr = int(self.m.jnt_qposadr[joint_id])
+            raw_qpos[i] = float(self.d.qpos[qpos_adr])
+            xml_qpos0[i] = float(self.m.qpos0[qpos_adr])
+
+        closed_chain_qpos = np.array(
+            [
+                self.d.qpos[self.handles.lf0_qpos_adr],
+                self.d.qpos[self.handles.l20_qpos_adr],
+                self.d.qpos[self.handles.rf0_qpos_adr],
+                self.d.qpos[self.handles.r20_qpos_adr],
+            ],
+            dtype=np.float64,
+        )
+        solver_phi = np.array(
+            [
+                DEFAULT_OFFSET + closed_chain_qpos[1],
+                closed_chain_qpos[0],
+                DEFAULT_OFFSET - closed_chain_qpos[3],
+                -closed_chain_qpos[2],
+            ],
+            dtype=np.float64,
+        )
+        policy_joint_q = np.asarray(policy_q[OBS_DOF_POS_IDXS], dtype=np.float32)
+        policy_qd = np.asarray(policy_qd, dtype=np.float32)
+        wheel_qd = policy_qd[[LW_IDX, RW_IDX]]
+        wheel_qd_obs = wheel_qd * OBS_SCALE_DOF_VEL
+        joint_obs = (policy_joint_q - self.active_default_obs_dof_pos) * OBS_SCALE_DOF_POS
+        policy_actions = np.asarray(actions, dtype=np.float32)
+        leg_action = policy_actions[OBS_DOF_POS_IDXS]
+        leg_pos_delta = leg_action * POS_ACTION_SCALE
+        leg_pos_target = self.active_default_obs_dof_pos + leg_pos_delta
+        wheel_vel_target = policy_actions[[LW_IDX, RW_IDX]] * VEL_ACTION_SCALE
+        tau_virtual = np.asarray(ctrl["tau_virtual"], dtype=np.float32)
+        tau_motor_raw = np.asarray(ctrl["tau_motor_raw"], dtype=np.float32)
+        tau_motor_limited = np.asarray(ctrl["tau_motor_limited"], dtype=np.float32)
+
+        print(f"\n[JOINT_SNAPSHOT] sim_time={float(self.d.time):.3f}s policy={self.active_policy_name}")
+        print("  names       = [lf0, lf1, l_wheel, rf0, rf1, r_wheel]")
+        print(f"  mujoco_qpos = {np.array2string(raw_qpos, precision=6, floatmode='fixed')}")
+        print(f"  xml_qpos0   = {np.array2string(xml_qpos0, precision=6, floatmode='fixed')}")
+        print(f"  sensor_q    = {np.array2string(raw_sensor_q, precision=6, floatmode='fixed')}")
+        print(f"  sensor_qd   = {np.array2string(raw_sensor_qd, precision=6, floatmode='fixed')} rad/s")
+        print("  closed names= [lf0_qpos, l20_qpos, rf0_qpos, r20_qpos]")
+        print(f"  closed_qpos = {np.array2string(closed_chain_qpos, precision=6, floatmode='fixed')}")
+        print("  solver names= [left_phi1, left_phi4, right_phi1, right_phi4]")
+        print(f"  solver_phi  = {np.array2string(solver_phi, precision=6, floatmode='fixed')}")
+        print(f"  solver_deg  = {np.array2string(np.rad2deg(solver_phi), precision=3, floatmode='fixed')}")
+        print("  policy names= [lf0, lf1_virtual, rf0, rf1_virtual]")
+        print(f"  policy_q    = {np.array2string(policy_joint_q, precision=6, floatmode='fixed')}")
+        print(f"  default_q   = {np.array2string(self.active_default_obs_dof_pos, precision=6, floatmode='fixed')}")
+        print(f"  obs[9:13]   = {np.array2string(joint_obs, precision=6, floatmode='fixed')}")
+        print(f"  policy_deg  = {np.array2string(np.rad2deg(policy_joint_q), precision=3, floatmode='fixed')}")
+        print("  action names= [lf0, lf1, l_wheel, rf0, rf1, r_wheel]")
+        print(f"  action      = {np.array2string(policy_actions, precision=6, floatmode='fixed')}")
+        print("  leg names   = [lf0, lf1, rf0, rf1]")
+        print(f"  pos_delta   = {np.array2string(leg_pos_delta, precision=6, floatmode='fixed')} rad")
+        print(f"  pos_target  = {np.array2string(leg_pos_target, precision=6, floatmode='fixed')} rad")
+        print("  wheel names = [l_wheel, r_wheel]")
+        print(f"  wheel_qd    = {np.array2string(wheel_qd, precision=6, floatmode='fixed')} rad/s")
+        print(f"  obs[15,18]  = {np.array2string(wheel_qd_obs, precision=6, floatmode='fixed')}")
+        print(f"  wheel_target= {np.array2string(wheel_vel_target, precision=6, floatmode='fixed')} rad/s")
+        print("  virtual tau names= [lf0, lf1_virtual, l_wheel, rf0, rf1_virtual, r_wheel]")
+        print(f"  tau_virtual = {np.array2string(tau_virtual, precision=6, floatmode='fixed')} N*m")
+        print("  motor tau names  = [lf0, l20, l_wheel, rf0, r20, r_wheel]")
+        print(f"  motor_tau_raw    = {np.array2string(tau_motor_raw, precision=6, floatmode='fixed')} N*m")
+        print(f"  motor_tau_limited= {np.array2string(tau_motor_limited, precision=6, floatmode='fixed')} N*m")
+        print(f"  torque_enabled   = {self.command_state.torque_enabled}\n")
+
     def build_obs(self, base_ang: np.ndarray, projected_g: np.ndarray, q: np.ndarray, qd: np.ndarray) -> np.ndarray:
         if self.args.print_base_ang_vel:
             self.debug_counter += 1
@@ -731,6 +831,10 @@ class BinglianRuntime:
             ftp_r[0, 0] *= float(self.args.jump_f_scale)
         tau_rf20_act, tau_rf0_act = (matrix_r @ ftp_r).reshape(-1).tolist()
 
+        tau_motor_raw = np.array(
+            [tau_lf0_act, tau_lf20_act, tau_virtual[LW_IDX], tau_rf0_act, tau_rf20_act, tau_virtual[RW_IDX]],
+            dtype=np.float32,
+        )
         tau_cmd = np.clip(
             np.array([tau_lf0_act, tau_virtual[LW_IDX], tau_rf0_act, tau_virtual[RW_IDX], tau_lf20_act, tau_rf20_act], dtype=np.float32),
             -TAU_MAX,
@@ -747,6 +851,9 @@ class BinglianRuntime:
             "tau_lf20": float(tau_cmd[4]),
             "tau_rf20": float(tau_cmd[5]),
             "tau_cmd": tau_cmd,
+            "tau_virtual": tau_virtual.copy(),
+            "tau_motor_raw": tau_motor_raw,
+            "tau_motor_limited": tau_cmd[[0, 4, 1, 2, 5, 3]].copy(),
         }
 
     def is_jump_f_scale_active(self) -> bool:
@@ -799,6 +906,8 @@ class BinglianRuntime:
                     self.handle_temporary_policy_return()
                     self.command_state.update_ramp(self.eff_policy_dt, self.args.cmd_ramp_time)
                     base_ang, projected_g, q, qd = self.build_state()
+                    print_joint_snapshot_requested = self.command_state.print_joint_snapshot_requested
+                    self.command_state.print_joint_snapshot_requested = False
                     obs = self.build_obs(base_ang, projected_g, q, qd)
                     self.update_history(obs)
                     actions = self.run_policy(obs)
@@ -807,6 +916,8 @@ class BinglianRuntime:
                     for step_idx in range(self.steps_per_policy):
                         ctrl = self.compute_control(actions, q_step, qd_step)
                         self.apply_ctrl(ctrl)
+                        if print_joint_snapshot_requested and step_idx == 0:
+                            self.print_joint_snapshot(q, qd, actions, ctrl)
                         mujoco.mj_step(self.m, self.d)
                         if step_idx < self.steps_per_policy - 1:
                             _, _, q_step, qd_step = self.build_state()
@@ -833,8 +944,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--torque_scale", type=float, default=1.0)
     parser.add_argument("--torque_map", type=str, default="analytic", choices=["analytic", "numeric"])
     parser.add_argument("--base_body_name", type=str, default="base_Link_del")
-    parser.add_argument("--l1", type=float, default=0.175)
-    parser.add_argument("--l2", type=float, default=0.208)
+    parser.add_argument("--l1", type=float, default=0.21)
+    parser.add_argument("--l2", type=float, default=0.25)
     parser.add_argument("--print_base_ang_vel", action="store_true")
     parser.add_argument("--print_jacobian", action="store_true")
     parser.add_argument("--print_interval", type=int, default=20)

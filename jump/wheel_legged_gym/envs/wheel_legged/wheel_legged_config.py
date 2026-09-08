@@ -71,10 +71,13 @@ class WheelLeggedCfg(LeggedRobotCfg):
         # file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V1/urdf/infantry_V1.urdf"
         # file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V1_old/urdf/old7.urdf"  # 原本的
 
-        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V4/urdf/infantry_V4_increase.urdf"
+        # Reuse the single long-leg URDF shared with the plane training project.
+        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/../plane/resources/robots/infantry_V4/urdf/infantry_V4_long_legs_0p21_0p25.urdf"
         # file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/old11/urdf/old11.urdf"
 
         name = "WheelLegged"
+        l1 = 0.21
+        l2 = 0.25
         self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
 

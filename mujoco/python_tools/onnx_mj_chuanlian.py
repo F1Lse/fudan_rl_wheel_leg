@@ -84,7 +84,7 @@ JUMP_POLICY_NAME = "jump"
 
 SPACE_MODE_KEY = "__space__"
 DEFAULT_XML_PATH = resource_path(
-    "assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel.xml"
+    "assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel_long_legs_24kg.xml"
 )
 DEFAULT_POLICY_NAME = RECOVER_POLICY_NAME
 jump_policy_duration_s = JUMP_POLICY_DURATION_S
@@ -124,8 +124,8 @@ CLIP_ACTIONS = 100.0
 CLIP_OBSERVATIONS = 100.0
 HISTORY_LEN = 5
 SERIAL_LEG_OFFSET = 0.0
-SERIAL_LEG_L1 = 0.175
-SERIAL_LEG_L2 = 0.208
+SERIAL_LEG_L1 = 0.21
+SERIAL_LEG_L2 = 0.25
 SERIAL_MAP_EPS = 1e-4
 
 CMD_LIN_VEL_STEP = 2.4

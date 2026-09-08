@@ -67,7 +67,7 @@ class WheelLeggedCfg(LeggedRobotCfg):
 
 
         # file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V1/urdf/infantry_V1.urdf"
-        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V4/urdf/infantry_V4_increase.urdf"
+        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/infantry_V4/urdf/infantry_V4_long_legs_0p21_0p25.urdf"
 
 
 
@@ -75,8 +75,8 @@ class WheelLeggedCfg(LeggedRobotCfg):
         offset = 0.0
         # l1 = 0.215
         # l2 = 0.258 旧车的
-        l1 = 0.175
-        l2 = 0.208
+        l1 = 0.21
+        l2 = 0.25
         penalize_contacts_on = []
         terminate_after_contacts_on = []
         self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
