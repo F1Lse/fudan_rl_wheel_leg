@@ -84,9 +84,10 @@ class LeggedRobotCfg(BaseConfig):
         # stairs down, advanced obstacles (discrete + custom curb/drop)]
         terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
         # trimesh only:
-        slope_treshold = (
-            0.75  # slopes above this threshold will be corrected to vertical surfaces
-        )
+        # A 50 mm rise over one 100 mm horizontal cell has slope 0.5. Keep the
+        # threshold just below that value so the custom curb is converted into
+        # a vertical step face instead of a short ramp.
+        slope_treshold = 0.45
 
     class commands:
         # Begin mixed-terrain adaptation at low speed. Terrain-specific command

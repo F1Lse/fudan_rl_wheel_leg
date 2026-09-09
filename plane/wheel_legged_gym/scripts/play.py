@@ -38,7 +38,6 @@ INITIAL_CAMERA_POSITION = [20.0, -20.0, 10.0]
 INITIAL_CAMERA_LOOK_AT = [20.0, 40.0, 0.0]
 FOLLOW_CAMERA_OFFSET = [-2.5, -3.0, 1.6]
 FOLLOW_CAMERA_LOOK_AHEAD = [0.8, 0.0, 0.2]
-FOLLOW_CAMERA_UPDATE_INTERVAL = 5
 PLAY_SPAWN_Z = 0.28
 
 
@@ -285,9 +284,6 @@ def play(args):
 
             obs, _, _, _, _, obs_history = env.step(actions)
             apply_manual_commands(env, env_cfg)
-
-            if focus_env_idx != 0 and i % FOLLOW_CAMERA_UPDATE_INTERVAL == 0:
-                update_follow_camera(env, focus_env_idx)
 
             if i % 50 == 0:
                 vz = env.root_states[focus_env_idx, 9].item()

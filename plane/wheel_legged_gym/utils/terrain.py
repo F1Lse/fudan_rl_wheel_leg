@@ -228,7 +228,7 @@ def curb_double_drop_terrain(
     terrain,
     approach_length=1.5,
     curb_height=0.05,
-    curb_top_length=0.10,
+    curb_top_length=0.20,
     first_drop=0.15,
     middle_platform_length=0.50,
     second_drop=0.20,
@@ -236,7 +236,7 @@ def curb_double_drop_terrain(
     """Create the measured curb/drop profile symmetrically about the spawn area.
 
     From the central platform, either travel direction encounters a 50 mm curb,
-    a 100 mm curb top, a 150 mm drop, a 500 mm platform, and a final 200 mm
+    a 200 mm curb top, a 150 mm drop, a 500 mm platform, and a final 200 mm
     drop. The mirrored layout lets both positive and negative velocity commands
     exercise the same obstacle sequence.
     """
