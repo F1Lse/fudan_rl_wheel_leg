@@ -29,13 +29,16 @@ running = True
 turn_left_pressed = False
 turn_right_pressed = False
 
-LIN_VEL_CMD = 2.0
-YAW_STEP = 2.0
+LIN_VEL_CMD = 0.5
+YAW_STEP = 1.0
 HEIGHT_STEP = 0.02
 
 # Initial viewer camera. Applied once after the environments are created.
 INITIAL_CAMERA_POSITION = [20.0, -20.0, 10.0]
 INITIAL_CAMERA_LOOK_AT = [20.0, 40.0, 0.0]
+FOLLOW_CAMERA_OFFSET = [-2.5, -3.0, 1.6]
+FOLLOW_CAMERA_LOOK_AHEAD = [0.8, 0.0, 0.2]
+FOLLOW_CAMERA_UPDATE_INTERVAL = 5
 PLAY_SPAWN_Z = 0.28
 
 
@@ -182,6 +185,21 @@ def apply_play_spawn_pose(env):
         env.last_root_vel[:] = env.root_states[:, 7:13]
 
 
+def update_follow_camera(env, env_idx):
+    """Keep the viewer close to the selected robot in world coordinates."""
+    if getattr(env, "viewer", None) is None:
+        return
+
+    robot_position = env.root_states[env_idx, :3].detach().cpu().tolist()
+    camera_position = [
+        robot_position[i] + FOLLOW_CAMERA_OFFSET[i] for i in range(3)
+    ]
+    camera_look_at = [
+        robot_position[i] + FOLLOW_CAMERA_LOOK_AHEAD[i] for i in range(3)
+    ]
+    env.set_camera(camera_position, camera_look_at)
+
+
 def play(args):
     global running
 
@@ -205,7 +223,9 @@ def play(args):
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
     env_cfg.env.episode_length_s = 20
     env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 10
+    # Keep all 20 curriculum columns so the custom curb/drop terrain (column
+    # 19) is present during visual validation.
+    env_cfg.terrain.num_cols = 20
     env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
@@ -220,8 +240,18 @@ def play(args):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     apply_play_spawn_pose(env)
     print(f"[PLAY] spawn height: z={PLAY_SPAWN_Z:.3f} m above terrain origin")
+
+    focus_env_idx = 0
+    custom_ids = getattr(env, "custom_curb_drop_idx", None)
+    if custom_ids is not None and len(custom_ids) != 0:
+        focus_env_idx = int(custom_ids[0].item())
+        print(f"[PLAY] focusing custom curb/drop env: {focus_env_idx}")
+
     if getattr(env, "viewer", None) is not None:
-        env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
+        if focus_env_idx == 0:
+            env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
+        else:
+            update_follow_camera(env, focus_env_idx)
 
     apply_manual_commands(env, env_cfg)
     obs, obs_history = env.get_observations()
@@ -256,14 +286,19 @@ def play(args):
             obs, _, _, _, _, obs_history = env.step(actions)
             apply_manual_commands(env, env_cfg)
 
+            if focus_env_idx != 0 and i % FOLLOW_CAMERA_UPDATE_INTERVAL == 0:
+                update_follow_camera(env, focus_env_idx)
+
             if i % 50 == 0:
-                vz = env.root_states[0, 9].item()
-                yaw_rate = env.base_ang_vel[0, 2].item()
+                vz = env.root_states[focus_env_idx, 9].item()
+                yaw_rate = env.base_ang_vel[focus_env_idx, 2].item()
                 # left_F = env.vmc_F[0, 0].item()
                 # right_F = env.vmc_F[0, 1].item()
                 print(
-                    f"[{i}] vz={vz:.3f}, cmd_x={env.commands[0, 0].item():.2f}, "
-                    f"cmd_yaw={env.commands[0, 1].item():.3f}, real_yaw={yaw_rate:.3f}, "
+                    f"[{i}] env={focus_env_idx}, vz={vz:.3f}, "
+                    f"cmd_x={env.commands[focus_env_idx, 0].item():.2f}, "
+                    f"cmd_yaw={env.commands[focus_env_idx, 1].item():.3f}, "
+                    f"real_yaw={yaw_rate:.3f}, "
                     # f"F_left={left_F:.2f}, F_right={right_F:.2f}"
                 )
             i += 1
