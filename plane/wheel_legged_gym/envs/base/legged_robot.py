@@ -311,6 +311,11 @@ class LeggedRobot(BaseTask):
             self.extras["episode"]["a_discrete_max_command_x"] = torch.mean(
                 self.command_ranges["lin_vel_x"][self.discrete_idx, 1].float()
             )
+            self.extras["episode"]["a_custom_curb_drop_max_command_x"] = torch.mean(
+                self.command_ranges["lin_vel_x"][
+                    self.custom_curb_drop_idx, 1
+                ].float()
+            )
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
@@ -1526,8 +1531,9 @@ class LeggedRobot(BaseTask):
                 rounding_mode="floor",
             ).to(torch.long)
             # num_cols = 20
-            # terrain types: [flat, smooth slope, rough slope, stairs up, stairs down, discrete]
-            # terrain types: [0 1 2 3, 4 5 6 7, 8 9 10 11, 12 13, 14 15 16 17, 18 19]
+            # terrain types: [flat, smooth slope, rough slope, stairs up,
+            # stairs down, discrete, custom curb/drop]
+            # terrain columns: [0..3, 4..7, 8..11, 12..13, 14..17, 18, 19]
             # terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
             self.flat_idx = (self.terrain_types < 4).nonzero(as_tuple=False).flatten()
             self.smooth_slope_idx = (
@@ -1551,7 +1557,12 @@ class LeggedRobot(BaseTask):
                 .flatten()
             )
             self.discrete_idx = (
-                ((18 <= self.terrain_types) * (self.terrain_types < 20))
+                ((18 <= self.terrain_types) * (self.terrain_types < 19))
+                .nonzero(as_tuple=False)
+                .flatten()
+            )
+            self.custom_curb_drop_idx = (
+                ((19 <= self.terrain_types) * (self.terrain_types < 20))
                 .nonzero(as_tuple=False)
                 .flatten()
             )
@@ -1564,7 +1575,11 @@ class LeggedRobot(BaseTask):
                 )
             )
             self.advanced_terrain_idx = torch.cat(
-                (self.stair_up_idx, self.discrete_idx)
+                (
+                    self.stair_up_idx,
+                    self.discrete_idx,
+                    self.custom_curb_drop_idx,
+                )
             )
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = (

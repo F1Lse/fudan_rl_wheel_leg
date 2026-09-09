@@ -166,17 +166,27 @@ class Terrain:
                 terrain, step_width=0.7, step_height=step_height, platform_size=4.0
             )
         elif choice < self.proportions[5]:
-            num_rectangles = 20
-            rectangle_min_size = 1.0
-            rectangle_max_size = 2.0
-            terrain_utils.discrete_obstacles_terrain(
-                terrain,
-                discrete_obstacles_height,
-                rectangle_min_size,
-                rectangle_max_size,
-                num_rectangles,
-                platform_size=3.0,
+            # Split the final 10% advanced-obstacle category evenly between
+            # the original discrete obstacles and the measured curb/drop
+            # scenario. Keeping both inside the existing category preserves
+            # the hard-coded terrain grouping used by the command curriculum.
+            custom_split = self.proportions[4] + 0.5 * (
+                self.proportions[5] - self.proportions[4]
             )
+            if choice < custom_split:
+                num_rectangles = 20
+                rectangle_min_size = 1.0
+                rectangle_max_size = 2.0
+                terrain_utils.discrete_obstacles_terrain(
+                    terrain,
+                    discrete_obstacles_height,
+                    rectangle_min_size,
+                    rectangle_max_size,
+                    num_rectangles,
+                    platform_size=3.0,
+                )
+            else:
+                curb_double_drop_terrain(terrain)
         elif choice < self.proportions[6]:
             terrain_utils.stepping_stones_terrain(
                 terrain,
@@ -212,6 +222,61 @@ class Terrain:
             np.max(terrain.height_field_raw[x1:x2, y1:y2]) * terrain.vertical_scale
         )
         self.env_origins[i, j] = [env_origin_x, env_origin_y, env_origin_z]
+
+
+def curb_double_drop_terrain(
+    terrain,
+    approach_length=1.5,
+    curb_height=0.05,
+    curb_top_length=0.10,
+    first_drop=0.15,
+    middle_platform_length=0.50,
+    second_drop=0.20,
+):
+    """Create the measured curb/drop profile symmetrically about the spawn area.
+
+    From the central platform, either travel direction encounters a 50 mm curb,
+    a 100 mm curb top, a 150 mm drop, a 500 mm platform, and a final 200 mm
+    drop. The mirrored layout lets both positive and negative velocity commands
+    exercise the same obstacle sequence.
+    """
+    horizontal_scale = terrain.horizontal_scale
+    vertical_scale = terrain.vertical_scale
+
+    approach_cells = max(1, int(round(approach_length / horizontal_scale)))
+    curb_cells = max(1, int(round(curb_top_length / horizontal_scale)))
+    middle_cells = max(
+        1, int(round(middle_platform_length / horizontal_scale))
+    )
+
+    center_x = terrain.length // 2
+    positive_curb_start = center_x + approach_cells
+    positive_curb_end = positive_curb_start + curb_cells
+    positive_middle_end = positive_curb_end + middle_cells
+    negative_curb_end = center_x - approach_cells
+    negative_curb_start = negative_curb_end - curb_cells
+    negative_middle_start = negative_curb_start - middle_cells
+
+    if negative_middle_start < 0 or positive_middle_end > terrain.length:
+        raise ValueError("curb/drop profile does not fit inside the terrain tile")
+
+    curb_raw = int(round(curb_height / vertical_scale))
+    middle_raw = int(round((curb_height - first_drop) / vertical_scale))
+    final_raw = int(
+        round((curb_height - first_drop - second_drop) / vertical_scale)
+    )
+
+    terrain.height_field_raw[:, :] = 0
+
+    # Positive-x course.
+    terrain.height_field_raw[positive_curb_start:positive_curb_end, :] = curb_raw
+    terrain.height_field_raw[positive_curb_end:positive_middle_end, :] = middle_raw
+    terrain.height_field_raw[positive_middle_end:, :] = final_raw
+
+    # Mirrored negative-x course.
+    terrain.height_field_raw[negative_curb_start:negative_curb_end, :] = curb_raw
+    terrain.height_field_raw[negative_middle_start:negative_curb_start, :] = middle_raw
+    terrain.height_field_raw[:negative_middle_start, :] = final_raw
 
 
 def gap_terrain(terrain, gap_size, platform_size=1.0):
