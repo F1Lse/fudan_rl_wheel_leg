@@ -103,7 +103,7 @@ class LeggedRobotCfg(BaseConfig):
             ang_vel_yaw = [-0.5, 0.5]  # min max [rad/s]
             # First learn one valid upright posture; height-command variation is
             # introduced only after upright balance is reliable.
-            height = [0.20, 0.20]
+            height = [0.16, 0.24]
             heading = [-3.14, 3.14]
 
     class init_state:

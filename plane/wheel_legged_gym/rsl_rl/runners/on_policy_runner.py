@@ -116,8 +116,9 @@ class OnPolicyRunner:
             self.env.num_envs, dtype=torch.float, device=self.device
         )
 
-        tot_iter = self.current_learning_iteration + num_learning_iterations
-        for it in range(self.current_learning_iteration, tot_iter):
+        start_iter = self.current_learning_iteration
+        tot_iter = start_iter + num_learning_iterations
+        for it in range(start_iter, tot_iter):
             start = time.time()
             # Rollout
             with torch.inference_mode():
@@ -172,13 +173,17 @@ class OnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
-            if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, "model_{}.pt".format(it)))
+            self.current_learning_iteration = it + 1
+            if self.current_learning_iteration % self.save_interval == 0:
+                self.save(
+                    os.path.join(
+                        self.log_dir,
+                        "model_{}.pt".format(self.current_learning_iteration),
+                    )
+                )
             ep_infos.clear()
-        self.current_learning_iteration = num_learning_iterations
-        self.save(
-            os.path.join(self.log_dir, "model_{}.pt".format(num_learning_iterations))
-        )
+        self.current_learning_iteration = tot_iter
+        self.save(os.path.join(self.log_dir, "model_{}.pt".format(tot_iter)))
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -231,7 +236,7 @@ class OnPolicyRunner:
                 locs["it"],
             )
 
-        str = f" \033[1m Learning iteration {locs['it']}/{locs['num_learning_iterations']} \033[0m "
+        str = f" \033[1m Learning iteration {locs['it'] + 1}/{locs['tot_iter']} \033[0m "
 
         if len(locs["rewbuffer"]) > 0:
             log_string = (
@@ -266,8 +271,8 @@ class OnPolicyRunner:
             f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
             f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
             f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-            f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-                               locs['num_learning_iterations'] - locs['it']):.1f}s\n"""
+            f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] - locs['start_iter'] + 1) * (
+                               locs['tot_iter'] - locs['it'] - 1):.1f}s\n"""
         )
         print(log_string)
 
