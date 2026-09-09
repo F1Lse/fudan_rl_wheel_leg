@@ -88,9 +88,9 @@ class LeggedRobotCfg(BaseConfig):
         )
 
     class commands:
-        # Upright-balance stage: begin at low speed and let the existing command
-        # curriculum expand the linear-velocity range as performance improves.
-        curriculum = True
+        # Height-specialization stage: keep locomotion commands small and fixed
+        # while the policy learns to follow the full height-command range.
+        curriculum = False
         basic_max_curriculum = 2.5
         advanced_max_curriculum = 1.5
         curriculum_threshold = 0.7
@@ -99,10 +99,9 @@ class LeggedRobotCfg(BaseConfig):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [-0.5, 0.5]  # min max [m/s]
-            ang_vel_yaw = [-0.5, 0.5]  # min max [rad/s]
-            # First learn one valid upright posture; height-command variation is
-            # introduced only after upright balance is reliable.
+            lin_vel_x = [-0.2, 0.2]  # min max [m/s]
+            ang_vel_yaw = [-0.2, 0.2]  # min max [rad/s]
+            # Continuously resampled every commands.resampling_time seconds.
             height = [0.16, 0.24]
             heading = [-3.14, 3.14]
 
@@ -194,8 +193,8 @@ class LeggedRobotCfg(BaseConfig):
             # theta0_equ_0 = 0.4
             # Coarse-to-fine height tracking: L1 supplies a non-vanishing
             # gradient while the broad Gaussian term improves precision.
-            base_height = -4.0
-            base_height_enhance = 0.5
+            base_height = -10.0
+            base_height_enhance = 1.0
             nominal_state = -1.0
             lin_vel_z = -1.0
             ang_vel_xy = -0.20 #-0.05
