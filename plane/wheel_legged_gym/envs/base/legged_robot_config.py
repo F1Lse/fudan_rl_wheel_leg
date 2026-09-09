@@ -28,7 +28,34 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import os
+
 from .base_config import BaseConfig
+
+
+def _env_bool(name, default):
+    """Read a strict boolean override used by staged training scripts."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be a boolean, got {raw!r}")
+
+
+def _env_float(name, default):
+    raw = os.getenv(name)
+    return default if raw is None else float(raw)
+
+
+def _env_choice(name, default, choices):
+    value = os.getenv(name, default).strip().lower()
+    if value not in choices:
+        raise ValueError(f"{name} must be one of {sorted(choices)}, got {value!r}")
+    return value
 
 
 class LeggedRobotCfg(BaseConfig):
@@ -83,6 +110,15 @@ class LeggedRobotCfg(BaseConfig):
         # terrain types: [flat, smooth slope, rough slope, stairs up,
         # stairs down, advanced obstacles (discrete + custom curb/drop)]
         terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
+        # descent_discrete: column 18 is the original discrete-obstacle terrain
+        # and column 19 is the curb/double-drop course used through model 7000.
+        # bidirectional: columns 18/19 become the descending and reverse-climb
+        # versions of that measured course, respectively.
+        custom_terrain_mode = _env_choice(
+            "WLG_CUSTOM_TERRAIN_MODE",
+            "descent_discrete",
+            {"descent_discrete", "bidirectional"},
+        )
         # trimesh only:
         # A 50 mm rise over one 100 mm horizontal cell has slope 0.5. Keep the
         # threshold just below that value so the custom curb is converted into
@@ -90,9 +126,9 @@ class LeggedRobotCfg(BaseConfig):
         slope_treshold = 0.45
 
     class commands:
-        # Begin mixed-terrain adaptation at low speed. Terrain-specific command
-        # curricula expand the linear-speed range after successful traversal.
-        curriculum = True
+        # Height-extension stage: keep locomotion commands bounded while the
+        # policy extends its learned height response above 0.24 m.
+        curriculum = _env_bool("WLG_COMMAND_CURRICULUM", False)
         basic_max_curriculum = 2.5
         advanced_max_curriculum = 1.5
         curriculum_threshold = 0.7
@@ -101,10 +137,19 @@ class LeggedRobotCfg(BaseConfig):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [-0.5, 0.5]  # min max [m/s]
-            ang_vel_yaw = [-1.0, 1.0]  # min max [rad/s]
+            lin_vel_x = [
+                _env_float("WLG_LIN_VEL_X_MIN", -0.8),
+                _env_float("WLG_LIN_VEL_X_MAX", 0.8),
+            ]  # min max [m/s]
+            ang_vel_yaw = [
+                _env_float("WLG_ANG_VEL_YAW_MIN", -1.0),
+                _env_float("WLG_ANG_VEL_YAW_MAX", 1.0),
+            ]  # min max [rad/s]
             # Continuously resampled every commands.resampling_time seconds.
-            height = [0.16, 0.24]
+            height = [
+                _env_float("WLG_HEIGHT_MIN", 0.16),
+                _env_float("WLG_HEIGHT_MAX", 0.28),
+            ]
             heading = [-3.14, 3.14]
 
     class init_state:
@@ -193,10 +238,13 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel_enhance = 1.0
 
             # theta0_equ_0 = 0.4
-            # Use the original narrow/broad Gaussian height rewards now that
-            # the policy has learned a reliable height response.
-            base_height = 1.0
-            base_height_enhance = 1.0
+            # Re-enable the non-vanishing L1 height penalty while extending the
+            # command range; switch back to the original Gaussian after the
+            # 0.33 m target is learned reliably.
+            base_height = _env_float("WLG_BASE_HEIGHT_SCALE", -10.0)
+            base_height_enhance = _env_float(
+                "WLG_BASE_HEIGHT_ENHANCE_SCALE", 1.0
+            )
             nominal_state = -1.0
             lin_vel_z = -1.0
             ang_vel_xy = -0.20 #-0.05

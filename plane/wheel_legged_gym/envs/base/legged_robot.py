@@ -308,14 +308,24 @@ class LeggedRobot(BaseTask):
             self.extras["episode"]["a_stair_down_max_command_x"] = torch.mean(
                 self.command_ranges["lin_vel_x"][self.stair_down_idx, 1].float()
             )
-            self.extras["episode"]["a_discrete_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.discrete_idx, 1].float()
-            )
-            self.extras["episode"]["a_custom_curb_drop_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][
-                    self.custom_curb_drop_idx, 1
-                ].float()
-            )
+            if self.discrete_idx.numel() > 0:
+                self.extras["episode"]["a_discrete_max_command_x"] = torch.mean(
+                    self.command_ranges["lin_vel_x"][self.discrete_idx, 1].float()
+                )
+            if self.custom_curb_drop_idx.numel() > 0:
+                self.extras["episode"]["a_custom_curb_drop_max_command_x"] = torch.mean(
+                    self.command_ranges["lin_vel_x"][
+                        self.custom_curb_drop_idx, 1
+                    ].float()
+                )
+            if self.custom_reverse_climb_idx.numel() > 0:
+                self.extras["episode"][
+                    "a_custom_reverse_climb_max_command_x"
+                ] = torch.mean(
+                    self.command_ranges["lin_vel_x"]
+                    [self.custom_reverse_climb_idx, 1]
+                    .float()
+                )
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
@@ -1532,7 +1542,8 @@ class LeggedRobot(BaseTask):
             ).to(torch.long)
             # num_cols = 20
             # terrain types: [flat, smooth slope, rough slope, stairs up,
-            # stairs down, discrete, custom curb/drop]
+            # stairs down, advanced column 18, advanced column 19]. The last
+            # two columns are remapped by custom_terrain_mode below.
             # terrain columns: [0..3, 4..7, 8..11, 12..13, 14..17, 18, 19]
             # terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
             self.flat_idx = (self.terrain_types < 4).nonzero(as_tuple=False).flatten()
@@ -1556,16 +1567,25 @@ class LeggedRobot(BaseTask):
                 .nonzero(as_tuple=False)
                 .flatten()
             )
-            self.discrete_idx = (
+            empty_terrain_idx = self.terrain_types[:0]
+            column_18_idx = (
                 ((18 <= self.terrain_types) * (self.terrain_types < 19))
                 .nonzero(as_tuple=False)
                 .flatten()
             )
-            self.custom_curb_drop_idx = (
+            column_19_idx = (
                 ((19 <= self.terrain_types) * (self.terrain_types < 20))
                 .nonzero(as_tuple=False)
                 .flatten()
             )
+            if self.cfg.terrain.custom_terrain_mode == "bidirectional":
+                self.discrete_idx = empty_terrain_idx
+                self.custom_curb_drop_idx = column_18_idx
+                self.custom_reverse_climb_idx = column_19_idx
+            else:
+                self.discrete_idx = column_18_idx
+                self.custom_curb_drop_idx = column_19_idx
+                self.custom_reverse_climb_idx = empty_terrain_idx
             self.basic_terrain_idx = torch.cat(
                 (
                     self.flat_idx,
@@ -1579,6 +1599,7 @@ class LeggedRobot(BaseTask):
                     self.stair_up_idx,
                     self.discrete_idx,
                     self.custom_curb_drop_idx,
+                    self.custom_reverse_climb_idx,
                 )
             )
             self.max_terrain_level = self.cfg.terrain.num_rows

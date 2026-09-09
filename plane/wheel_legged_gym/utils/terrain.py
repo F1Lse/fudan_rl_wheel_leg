@@ -166,14 +166,16 @@ class Terrain:
                 terrain, step_width=0.7, step_height=step_height, platform_size=4.0
             )
         elif choice < self.proportions[5]:
-            # Split the final 10% advanced-obstacle category evenly between
-            # the original discrete obstacles and the measured curb/drop
-            # scenario. Keeping both inside the existing category preserves
-            # the hard-coded terrain grouping used by the command curriculum.
+            # Split the final 10% advanced-obstacle category evenly. During
+            # ordinary training this retains the original discrete obstacles;
+            # during the bidirectional stage it supplies descending and
+            # reverse-climb versions of the measured curb/drop course.
             custom_split = self.proportions[4] + 0.5 * (
                 self.proportions[5] - self.proportions[4]
             )
-            if choice < custom_split:
+            if self.cfg.custom_terrain_mode == "bidirectional":
+                curb_double_drop_terrain(terrain, reverse=choice >= custom_split)
+            elif choice < custom_split:
                 num_rectangles = 20
                 rectangle_min_size = 1.0
                 rectangle_max_size = 2.0
@@ -232,6 +234,7 @@ def curb_double_drop_terrain(
     first_drop=0.15,
     middle_platform_length=0.50,
     second_drop=0.20,
+    reverse=False,
 ):
     """Create the measured curb/drop profile symmetrically about the spawn area.
 
@@ -266,17 +269,46 @@ def curb_double_drop_terrain(
         round((curb_height - first_drop - second_drop) / vertical_scale)
     )
 
-    terrain.height_field_raw[:, :] = 0
+    if reverse:
+        # Spawn on the -0.30 m lower surface. Travelling in either direction
+        # climbs 0.20 m, crosses 0.50 m, climbs 0.15 m, crosses the curb top,
+        # then drops 0.05 m back to the surrounding zero-height surface.
+        terrain.height_field_raw[:, :] = final_raw
 
-    # Positive-x course.
-    terrain.height_field_raw[positive_curb_start:positive_curb_end, :] = curb_raw
-    terrain.height_field_raw[positive_curb_end:positive_middle_end, :] = middle_raw
-    terrain.height_field_raw[positive_middle_end:, :] = final_raw
+        positive_middle_start = positive_curb_start
+        positive_middle_end = positive_middle_start + middle_cells
+        positive_curb_start = positive_middle_end
+        positive_curb_end = positive_curb_start + curb_cells
+        negative_middle_end = negative_curb_end
+        negative_middle_start = negative_middle_end - middle_cells
+        negative_curb_end = negative_middle_start
+        negative_curb_start = negative_curb_end - curb_cells
 
-    # Mirrored negative-x course.
-    terrain.height_field_raw[negative_curb_start:negative_curb_end, :] = curb_raw
-    terrain.height_field_raw[negative_middle_start:negative_curb_start, :] = middle_raw
-    terrain.height_field_raw[:negative_middle_start, :] = final_raw
+        if negative_curb_start < 0 or positive_curb_end > terrain.length:
+            raise ValueError("reverse curb/climb profile does not fit inside the tile")
+
+        terrain.height_field_raw[
+            positive_middle_start:positive_middle_end, :
+        ] = middle_raw
+        terrain.height_field_raw[positive_curb_start:positive_curb_end, :] = curb_raw
+        terrain.height_field_raw[positive_curb_end:, :] = 0
+        terrain.height_field_raw[
+            negative_middle_start:negative_middle_end, :
+        ] = middle_raw
+        terrain.height_field_raw[negative_curb_start:negative_curb_end, :] = curb_raw
+        terrain.height_field_raw[:negative_curb_start, :] = 0
+    else:
+        terrain.height_field_raw[:, :] = 0
+
+        # Positive-x descending course.
+        terrain.height_field_raw[positive_curb_start:positive_curb_end, :] = curb_raw
+        terrain.height_field_raw[positive_curb_end:positive_middle_end, :] = middle_raw
+        terrain.height_field_raw[positive_middle_end:, :] = final_raw
+
+        # Mirrored negative-x descending course.
+        terrain.height_field_raw[negative_curb_start:negative_curb_end, :] = curb_raw
+        terrain.height_field_raw[negative_middle_start:negative_curb_start, :] = middle_raw
+        terrain.height_field_raw[:negative_middle_start, :] = final_raw
 
 
 def gap_terrain(terrain, gap_size, platform_size=1.0):
