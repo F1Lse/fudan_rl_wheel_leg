@@ -88,7 +88,9 @@ class LeggedRobotCfg(BaseConfig):
         )
 
     class commands:
-        curriculum = True
+        # Height-only fine-tuning stage. Keep velocity commands fixed until the
+        # policy learns to follow the height channel.
+        curriculum = False
         basic_max_curriculum = 2.5
         advanced_max_curriculum = 1.5
         curriculum_threshold = 0.7
@@ -97,8 +99,8 @@ class LeggedRobotCfg(BaseConfig):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [-2.0, 2.0]  # min max [m/s]
-            ang_vel_yaw = [-2, 2]  # min max [rad/s]
+            lin_vel_x = [0.0, 0.0]  # min max [m/s]
+            ang_vel_yaw = [0.0, 0.0]  # min max [rad/s]
             # First height-tracking stage. Contact constraints prevent the old
             # low-height command range from being satisfied by kneeling.
             height = [0.10, 0.20]
@@ -190,10 +192,9 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel_enhance = 1.0
 
             # theta0_equ_0 = 0.4
-            # Use the L1-error branch in _reward_base_height. The previous
-            # positive exponential reward was effectively zero when the policy
-            # settled near 0.10 m, far from the 0.22-0.26 m command range.
-            base_height = -5.0
+            # Use the L1-error branch in _reward_base_height. A stronger weight
+            # makes height learning the focus while velocity commands are zero.
+            base_height = -8.0
             nominal_state = -1.0
             lin_vel_z = -1.0
             ang_vel_xy = -0.20 #-0.05
