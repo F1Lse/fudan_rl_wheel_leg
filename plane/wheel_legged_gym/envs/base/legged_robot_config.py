@@ -49,7 +49,7 @@ class LeggedRobotCfg(BaseConfig):
 
     class terrain:
         # mesh_type = "trimesh"  # "heightfield" # none, plane, heightfield or trimesh
-        mesh_type = "plane"
+        mesh_type = "trimesh"
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 25  # [m]
@@ -88,8 +88,8 @@ class LeggedRobotCfg(BaseConfig):
         )
 
     class commands:
-        # Restore the locomotion curriculum after height specialization while
-        # retaining continuous height-command variation.
+        # Begin mixed-terrain adaptation at low speed. Terrain-specific command
+        # curricula expand the linear-speed range after successful traversal.
         curriculum = True
         basic_max_curriculum = 2.5
         advanced_max_curriculum = 1.5
@@ -100,7 +100,7 @@ class LeggedRobotCfg(BaseConfig):
 
         class ranges:
             lin_vel_x = [-0.5, 0.5]  # min max [m/s]
-            ang_vel_yaw = [-0.5, 0.5]  # min max [rad/s]
+            ang_vel_yaw = [-1.0, 1.0]  # min max [rad/s]
             # Continuously resampled every commands.resampling_time seconds.
             height = [0.16, 0.24]
             heading = [-3.14, 3.14]
