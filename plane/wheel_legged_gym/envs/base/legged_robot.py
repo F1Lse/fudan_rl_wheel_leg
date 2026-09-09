@@ -216,6 +216,10 @@ class LeggedRobot(BaseTask):
             dim=1,
         )
         fail_buf |= self.projected_gravity[:, 2] > -0.1
+        # Reject the stable collapsed-knee solution. A one-second grace period is
+        # still applied below through fail_to_terminal_time_s, so brief height
+        # excursions during balancing do not immediately reset the environment.
+        fail_buf |= self.base_height < (self.commands[:, 2] - 0.06)
         self.fail_buf *= fail_buf
         self.fail_buf += fail_buf
         self.time_out_buf = (

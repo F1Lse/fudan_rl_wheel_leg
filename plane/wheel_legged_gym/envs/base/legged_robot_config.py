@@ -88,9 +88,9 @@ class LeggedRobotCfg(BaseConfig):
         )
 
     class commands:
-        # Height-only fine-tuning stage. Keep velocity commands fixed until the
-        # policy learns to follow the height channel.
-        curriculum = False
+        # Upright-balance stage: begin at low speed and let the existing command
+        # curriculum expand the linear-velocity range as performance improves.
+        curriculum = True
         basic_max_curriculum = 2.5
         advanced_max_curriculum = 1.5
         curriculum_threshold = 0.7
@@ -99,11 +99,11 @@ class LeggedRobotCfg(BaseConfig):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [0.0, 0.0]  # min max [m/s]
-            ang_vel_yaw = [0.0, 0.0]  # min max [rad/s]
-            # First height-tracking stage. Contact constraints prevent the old
-            # low-height command range from being satisfied by kneeling.
-            height = [0.10, 0.20]
+            lin_vel_x = [-0.5, 0.5]  # min max [m/s]
+            ang_vel_yaw = [-0.5, 0.5]  # min max [rad/s]
+            # First learn one valid upright posture; height-command variation is
+            # introduced only after upright balance is reliable.
+            height = [0.20, 0.20]
             heading = [-3.14, 3.14]
 
     class init_state:
@@ -192,9 +192,10 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel_enhance = 1.0
 
             # theta0_equ_0 = 0.4
-            # Use the L1-error branch in _reward_base_height. A stronger weight
-            # makes height learning the focus while velocity commands are zero.
-            base_height = -8.0
+            # Coarse-to-fine height tracking: L1 supplies a non-vanishing
+            # gradient while the broad Gaussian term improves precision.
+            base_height = -4.0
+            base_height_enhance = 0.5
             nominal_state = -1.0
             lin_vel_z = -1.0
             ang_vel_xy = -0.20 #-0.05
@@ -207,7 +208,9 @@ class LeggedRobotCfg(BaseConfig):
             action_smooth = -0.01#-0.01
 
             collision = -1.0
-            dof_pos_limits = -1.0
+            # The previous policy deliberately drove both knee joints into their
+            # hard stops; make that behavior substantially more expensive.
+            dof_pos_limits = -5.0
 
         only_positive_rewards = False  # if true negative total rewards are clipped at zero (avoids early termination problems)
         clip_single_reward = 1
