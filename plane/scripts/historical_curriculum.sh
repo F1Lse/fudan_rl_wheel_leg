@@ -44,6 +44,7 @@ Usage:
   bash scripts/historical_curriculum.sh train    # start or resume, then run all remaining stages
   bash scripts/historical_curriculum.sh status   # show detected stage/checkpoints
   bash scripts/historical_curriculum.sh play     # play the newest checkpoint (default: 5 robots)
+  bash scripts/historical_curriculum.sh play 2000 # play one exact checkpoint
   bash scripts/historical_curriculum.sh export   # export the newest checkpoint to ONNX
 
 Environment overrides:
@@ -97,6 +98,37 @@ latest_checkpoint_overall() {
   done
 
   printf '%s\t%s\t%s\n' "$best_stage" "$best_iter" "$best_path"
+}
+
+find_exact_checkpoint() {
+  local requested_iter="$1"
+  local stage_index path dir_name run_name best_mtime=-1 mtime
+  local best_stage=-1
+  local best_path=""
+
+  [[ "$requested_iter" =~ ^[0-9]+$ ]] || {
+    echo "Checkpoint must be a non-negative integer, got: $requested_iter" >&2
+    return 2
+  }
+
+  if [[ -d "$LOG_ROOT" ]]; then
+    while IFS= read -r -d '' path; do
+      dir_name="$(basename "$(dirname "$path")")"
+      for stage_index in "${!STAGE_RUN_NAMES[@]}"; do
+        run_name="${STAGE_RUN_NAMES[$stage_index]}"
+        [[ "$dir_name" == *_"$run_name" ]] || continue
+        mtime="$(stat -c %Y "$path")"
+        if (( mtime > best_mtime )); then
+          best_stage="$stage_index"
+          best_mtime="$mtime"
+          best_path="$path"
+        fi
+      done
+    done < <(find "$LOG_ROOT" -mindepth 2 -maxdepth 2 -type f \
+      -name "model_${requested_iter}.pt" -print0)
+  fi
+
+  printf '%s\t%s\t%s\n' "$best_stage" "$requested_iter" "$best_path"
 }
 
 apply_common_environment() {
@@ -334,11 +366,20 @@ train_all() {
   echo "Final checkpoint: $final_path"
 }
 
-play_latest() {
+play_checkpoint() {
+  local requested_iter="${1:-}"
   local stage_index iter path run_dir
-  IFS=$'\t' read -r stage_index iter path < <(latest_checkpoint_overall)
+  if [[ -n "$requested_iter" ]]; then
+    IFS=$'\t' read -r stage_index iter path < <(find_exact_checkpoint "$requested_iter")
+  else
+    IFS=$'\t' read -r stage_index iter path < <(latest_checkpoint_overall)
+  fi
   if (( stage_index < 0 )); then
-    echo "No checkpoint created by this curriculum was found." >&2
+    if [[ -n "$requested_iter" ]]; then
+      echo "No model_${requested_iter}.pt created by this curriculum was found." >&2
+    else
+      echo "No checkpoint created by this curriculum was found." >&2
+    fi
     exit 1
   fi
   apply_stage_environment "$stage_index"
@@ -382,7 +423,7 @@ trap on_interrupt INT TERM
 case "${1:-train}" in
   train) train_all ;;
   status) show_status ;;
-  play) play_latest ;;
+  play) play_checkpoint "${2:-}" ;;
   export) export_latest ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 2 ;;

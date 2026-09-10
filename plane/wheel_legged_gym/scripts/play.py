@@ -39,6 +39,9 @@ INITIAL_CAMERA_LOOK_AT = [20.0, 40.0, 0.0]
 FOLLOW_CAMERA_OFFSET = [-2.5, -3.0, 1.6]
 FOLLOW_CAMERA_LOOK_AHEAD = [0.8, 0.0, 0.2]
 PLAY_SPAWN_Z = float(os.getenv("WLG_PLAY_SPAWN_Z", "0.30"))
+PLAY_WITH_RANDOMIZATION = os.getenv(
+    "WLG_PLAY_WITH_RANDOMIZATION", "1"
+).strip().lower() in ("1", "true", "yes", "on")
 
 
 
@@ -226,9 +229,22 @@ def play(args):
     # 19) is present during visual validation.
     env_cfg.terrain.num_cols = 20
     env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
-    env_cfg.noise.add_noise = False
-    env_cfg.domain_rand.randomize_friction = False
-    env_cfg.domain_rand.push_robots = False
+    if PLAY_WITH_RANDOMIZATION:
+        print("[PLAY] training randomization: enabled")
+    else:
+        print("[PLAY] training randomization: disabled")
+        env_cfg.noise.add_noise = False
+        env_cfg.domain_rand.randomize_friction = False
+        env_cfg.domain_rand.randomize_restitution = False
+        env_cfg.domain_rand.randomize_base_mass = False
+        env_cfg.domain_rand.randomize_inertia = False
+        env_cfg.domain_rand.randomize_base_com = False
+        env_cfg.domain_rand.randomize_Kp = False
+        env_cfg.domain_rand.randomize_Kd = False
+        env_cfg.domain_rand.randomize_motor_torque = False
+        env_cfg.domain_rand.randomize_default_dof_pos = False
+        env_cfg.domain_rand.randomize_action_delay = False
+        env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.lift_robots = False
     env_cfg.domain_rand.downward_impulse_robots = False
     env_cfg.domain_rand.downward_impulse_interval_s = 3

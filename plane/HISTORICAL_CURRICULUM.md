@@ -41,10 +41,23 @@ bash scripts/historical_curriculum.sh train
 bash scripts/historical_curriculum.sh play
 ```
 
+也可以指定某个累计检查点，例如验证第一阶段的平地模型：
+
+```bash
+bash scripts/historical_curriculum.sh play 2000
+```
+
 默认显示 5 台机器人；可以临时修改：
 
 ```bash
 WLG_PLAY_NUM_ENVS=1 bash scripts/historical_curriculum.sh play
+```
+
+Play 默认保留训练时的噪声、质量、质心、摩擦、PD、动作延迟和外部推力随机化。如果需要做一次完全确定性的对照测试：
+
+```bash
+WLG_PLAY_WITH_RANDOMIZATION=0 \
+  bash scripts/historical_curriculum.sh play 2000
 ```
 
 验证后继续：
