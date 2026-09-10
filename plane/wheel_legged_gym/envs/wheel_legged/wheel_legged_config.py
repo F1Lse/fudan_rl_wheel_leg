@@ -61,8 +61,11 @@ class WheelLeggedCfg(LeggedRobotCfg):
         pos_action_scale = 0.5
         vel_action_scale = 10.0
         # PD Drive parameters:
-        stiffness = {"f0": 20.0, "f1": 20.0, "wheel": 0.0}
-        damping = {"f0": 1.0, "f1": 1.0, "wheel": 0.2}
+        # Match the STM32 low-level controller used for deployment. The leg
+        # gains act on the serial-equivalent virtual joints; wheel damping is
+        # the velocity-control gain because wheel stiffness is zero.
+        stiffness = {"f0": 15.0, "f1": 15.0, "wheel": 0.0}
+        damping = {"f0": 1.0, "f1": 1.0, "wheel": 0.1}
 
 
     class asset(LeggedRobotCfg.asset):
