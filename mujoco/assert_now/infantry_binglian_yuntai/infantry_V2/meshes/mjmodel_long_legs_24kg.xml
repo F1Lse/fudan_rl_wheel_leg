@@ -99,8 +99,10 @@
         rgba="0.16 0.62 0.78 1"
         contype="2" conaffinity="1"/>
 
-    <!-- Spawn is raised by the 0.077 m increase in total leg length. -->
-    <body name="base_Link_del" pos="-2.8 0 0.577" quat="1 0 0 0">
+    <!-- Start on the unobstructed floor.  The former x=-2.8 pose was above the
+         0.30 m landing platform; subtracting that platform height preserves
+         the same initial wheel clearance on the plane. -->
+    <body name="base_Link_del" pos="0 0 0.277" quat="1 0 0 0">
       <freejoint/>
       <inertial
         pos="-0.00406060 0.0008523 0.09714204"

@@ -51,11 +51,32 @@ def _env_float(name, default):
     return default if raw is None else float(raw)
 
 
+def _env_int(name, default):
+    raw = os.getenv(name)
+    return default if raw is None else int(raw)
+
+
+def _env_float_list(name, default):
+    """Read a comma-separated float list and preserve the expected length."""
+    raw = os.getenv(name)
+    if raw is None:
+        return list(default)
+    values = [float(value.strip()) for value in raw.split(",") if value.strip()]
+    if len(values) != len(default):
+        raise ValueError(
+            f"{name} must contain {len(default)} comma-separated values, got {raw!r}"
+        )
+    return values
+
+
 def _env_choice(name, default, choices):
     value = os.getenv(name, default).strip().lower()
     if value not in choices:
         raise ValueError(f"{name} must be one of {sorted(choices)}, got {value!r}")
     return value
+
+
+_HISTORICAL_DOMAIN_RAND = _env_bool("WLG_HISTORICAL_DOMAIN_RAND", False)
 
 
 class LeggedRobotCfg(BaseConfig):
@@ -82,7 +103,7 @@ class LeggedRobotCfg(BaseConfig):
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 25  # [m]
-        curriculum = True
+        curriculum = _env_bool("WLG_TERRAIN_CURRICULUM", True)
         static_friction = 0.5
         dynamic_friction = 0.5
         restitution = 0.5
@@ -104,14 +125,23 @@ class LeggedRobotCfg(BaseConfig):
         measured_points_y = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
         selected = False  # select a unique terrain type and pass all arguments
         terrain_kwargs = None  # Dict of arguments for selected terrain
-        max_init_terrain_level = 5  # starting curriculum state
+        max_init_terrain_level = _env_int(
+            "WLG_MAX_INIT_TERRAIN_LEVEL", 5
+        )  # starting curriculum state
         terrain_length = 8.0
         terrain_width = 8.0
         num_rows = 10  # number of terrain rows (levels)#原本是10
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [flat, smooth slope, rough slope, stairs up,
         # stairs down, advanced obstacles (discrete + custom curb/drop)]
-        terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
+        terrain_proportions = _env_float_list(
+            "WLG_TERRAIN_PROPORTIONS", [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
+        )
+        # Required travel distance as a fraction of terrain_length before an
+        # environment advances one terrain level.
+        progress_distance_fraction = _env_float(
+            "WLG_TERRAIN_PROGRESS_FRACTION", 0.25
+        )
         # descent_discrete: column 18 is the original discrete-obstacle terrain
         # and column 19 is the curb/double-drop course used through model 7000.
         # bidirectional: columns 18/19 become the descending and reverse-climb
@@ -126,7 +156,7 @@ class LeggedRobotCfg(BaseConfig):
         # A 50 mm rise over one 100 mm horizontal cell has slope 0.5. Keep the
         # threshold just below that value so the custom curb is converted into
         # a vertical step face instead of a short ramp.
-        slope_treshold = 0.45
+        slope_treshold = _env_float("WLG_SLOPE_THRESHOLD", 0.45)
 
     class commands:
         # Height-extension stage: keep locomotion commands bounded while the
@@ -136,9 +166,17 @@ class LeggedRobotCfg(BaseConfig):
         advanced_max_curriculum = _env_float(
             "WLG_ADVANCED_MAX_CURRICULUM", 1.5
         )
+        basic_max_ang_vel_curriculum = _env_float(
+            "WLG_BASIC_MAX_ANG_VEL_CURRICULUM", 6.0
+        )
+        advanced_max_ang_vel_curriculum = _env_float(
+            "WLG_ADVANCED_MAX_ANG_VEL_CURRICULUM", 6.0
+        )
         curriculum_threshold = 0.7
         num_commands = 3  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 5.0  # time before command are changed[s]
+        resampling_time = _env_float(
+            "WLG_COMMAND_RESAMPLING_TIME", 5.0
+        )  # time before command are changed[s]
         heading_command = False  # if true: compute ang vel command from heading error
         # Negative disables terrain-specific height commands. The focused
         # reverse-climb stage sets this to 0.33 m through an environment variable.
@@ -242,27 +280,41 @@ class LeggedRobotCfg(BaseConfig):
 
     class domain_rand:
         randomize_friction = True
-        friction_range = [0.6, 1.4]
+        friction_range = [0.1, 2.0] if _HISTORICAL_DOMAIN_RAND else [0.6, 1.4]
         randomize_restitution = True
-        restitution_range = [0.6, 1.0]
+        restitution_range = [0.0, 1.0] if _HISTORICAL_DOMAIN_RAND else [0.6, 1.0]
         randomize_base_mass = True
-        added_mass_range = [-1.0, 2.0]
+        added_mass_range = [-2.0, 3.0] if _HISTORICAL_DOMAIN_RAND else [-1.0, 2.0]
         randomize_inertia = True
-        randomize_inertia_range = [0.9, 1.1]
+        randomize_inertia_range = (
+            [0.8, 1.2] if _HISTORICAL_DOMAIN_RAND else [0.9, 1.1]
+        )
         randomize_base_com = True
-        rand_com_vec = [0.02, 0.02, 0.02]
-        push_robots = False
+        rand_com_vec = (
+            [0.05, 0.05, 0.05]
+            if _HISTORICAL_DOMAIN_RAND
+            else [0.02, 0.02, 0.02]
+        )
+        push_robots = _HISTORICAL_DOMAIN_RAND
         push_interval_s = 7
         max_push_vel_xy = 2.0
         randomize_Kp = True
-        randomize_Kp_range = [0.95, 1.05]
+        randomize_Kp_range = (
+            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
+        )
         randomize_Kd = True
-        randomize_Kd_range = [0.95, 1.05]
+        randomize_Kd_range = (
+            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
+        )
         randomize_motor_torque = True
-        randomize_motor_torque_range = [0.95, 1.05]
+        randomize_motor_torque_range = (
+            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
+        )
         randomize_default_dof_pos = True
-        randomize_default_dof_pos_range = [-0.03, 0.03]
-        randomize_action_delay = False
+        randomize_default_dof_pos_range = (
+            [-0.05, 0.05] if _HISTORICAL_DOMAIN_RAND else [-0.03, 0.03]
+        )
+        randomize_action_delay = _HISTORICAL_DOMAIN_RAND
         delay_ms_range = [0, 10]
 
     class rewards:
@@ -271,8 +323,10 @@ class LeggedRobotCfg(BaseConfig):
             tracking_lin_vel_enhance = _env_float(
                 "WLG_TRACKING_LIN_VEL_ENHANCE_SCALE", 1.0
             )
-            tracking_ang_vel = 1.0
-            tracking_ang_vel_enhance = 1.0
+            tracking_ang_vel = _env_float("WLG_TRACKING_ANG_VEL_SCALE", 1.0)
+            tracking_ang_vel_enhance = _env_float(
+                "WLG_TRACKING_ANG_VEL_ENHANCE_SCALE", 1.0
+            )
 
             # theta0_equ_0 = 0.4
             # Re-enable the non-vanishing L1 height penalty while extending the
@@ -282,21 +336,21 @@ class LeggedRobotCfg(BaseConfig):
             base_height_enhance = _env_float(
                 "WLG_BASE_HEIGHT_ENHANCE_SCALE", 1.0
             )
-            nominal_state = -1.0
-            lin_vel_z = -1.0
-            ang_vel_xy = -0.20 #-0.05
-            orientation = -100.0 #-10
+            nominal_state = _env_float("WLG_NOMINAL_STATE_SCALE", -1.0)
+            lin_vel_z = _env_float("WLG_LIN_VEL_Z_SCALE", -1.0)
+            ang_vel_xy = _env_float("WLG_ANG_VEL_XY_SCALE", -0.20) #-0.05
+            orientation = _env_float("WLG_ORIENTATION_SCALE", -100.0) #-10
 
-            dof_vel = -5e-5 #-5e-5
-            dof_acc = -2.5e-7 #-2.5e-7
-            torques = -0.0001 #-0.0001
+            dof_vel = _env_float("WLG_DOF_VEL_SCALE", -5e-5) #-5e-5
+            dof_acc = _env_float("WLG_DOF_ACC_SCALE", -2.5e-7) #-2.5e-7
+            torques = _env_float("WLG_TORQUES_SCALE", -0.0001) #-0.0001
             action_rate = _env_float("WLG_ACTION_RATE_SCALE", -0.01)
             action_smooth = _env_float("WLG_ACTION_SMOOTH_SCALE", -0.01)
 
-            collision = -1.0
+            collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             # The previous policy deliberately drove both knee joints into their
             # hard stops; make that behavior substantially more expensive.
-            dof_pos_limits = -5.0
+            dof_pos_limits = _env_float("WLG_DOF_POS_LIMITS_SCALE", -5.0)
 
         only_positive_rewards = False  # if true negative total rewards are clipped at zero (avoids early termination problems)
         clip_single_reward = 1
@@ -311,7 +365,7 @@ class LeggedRobotCfg(BaseConfig):
 
     class normalization:
         class obs_scales:
-            lin_vel = 2.0
+            lin_vel = _env_float("WLG_OBS_LIN_VEL_SCALE", 2.0)
             ang_vel = 0.25
             dof_pos = 1.0
             dof_vel = 0.05

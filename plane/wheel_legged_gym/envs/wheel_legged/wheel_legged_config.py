@@ -48,12 +48,15 @@ class WheelLeggedCfg(LeggedRobotCfg):
         # The lowest collision geometry is about 0.244 m below the root in the
         # default pose. Keep a small clearance so resets do not start in contact.
         pos = [0.0, 0.0, 0.30]  # x,y,z [m]
-        default_joint_angles = { "lf0_Joint": 0.2, 
-                                "lf1_Joint": 0.4, 
-                                "l_wheel_Joint": 0.0, 
-                                "rf0_Joint": -0.2, 
-                                "rf1_Joint": -0.4, 
-                                "r_wheel_Joint": 0.0, 
+        # Restore the default pose used by the historical Stable policy chain.
+        # Keeping this reference pose aligned across training, MuJoCo and STM32
+        # avoids making the policy relearn a deployment-side offset.
+        default_joint_angles = { "lf0_Joint": -0.23,
+                                "lf1_Joint": -0.65,
+                                "l_wheel_Joint": 0.0,
+                                "rf0_Joint": 0.23,
+                                "rf1_Joint": 0.65,
+                                "r_wheel_Joint": 0.0,
                                 }
 
 

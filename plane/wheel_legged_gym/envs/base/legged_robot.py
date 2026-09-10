@@ -954,7 +954,11 @@ class LeggedRobot(BaseTask):
             self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1
         )
         # robots that walked far enough progress to harder terains
-        move_up = distance > self.terrain.env_length / 4  #原本是/2
+        move_up = (
+            distance
+            > self.terrain.env_length
+            * self.cfg.terrain.progress_distance_fraction
+        )
         # robots that walked less than half of their required distance go to simpler terrains
         move_down = (
             self.episode_sums["tracking_lin_vel"][env_ids] / self.max_episode_length_s
@@ -975,15 +979,19 @@ class LeggedRobot(BaseTask):
             self.terrain_levels[env_ids], self.terrain_types[env_ids]
         ]
         if self.cfg.commands.curriculum:
-            self.command_ranges["lin_vel_x"][self.fail_ids, 0] = torch.clip(
-                self.command_ranges["lin_vel_x"][self.fail_ids, 0] + 0.25,
-                -self.cfg.commands.basic_max_curriculum,
-                -1,
+            self._shrink_command_range(
+                "lin_vel_x",
+                self.fail_ids,
+                step=0.25,
+                min_abs=1.0,
+                max_abs=self.cfg.commands.basic_max_curriculum,
             )
-            self.command_ranges["lin_vel_x"][self.fail_ids, 1] = torch.clip(
-                self.command_ranges["lin_vel_x"][self.fail_ids, 1] - 0.25,
-                1,
-                self.cfg.commands.basic_max_curriculum,
+            self._shrink_command_range(
+                "ang_vel_yaw",
+                self.fail_ids,
+                step=0.5,
+                min_abs=1.0,
+                max_abs=self.cfg.commands.basic_max_ang_vel_curriculum,
             )
 
     def update_command_curriculum(self, env_ids):
@@ -992,37 +1000,45 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): ids of environments being reset
         """
-        # If the tracking reward is above 80% of the maximum, increase the range of commands
+        # If both tracking rewards are high enough, increase both command ranges.
         if self.cfg.terrain.curriculum and len(self.success_ids) != 0:
-            # self.basic_terrain_idx = torch.cat((self.stair_up_idx, self.discrete_idx))
-            # self.advanced_terrain_idx
             mask = (
                 self.episode_sums["tracking_lin_vel"][self.success_ids]
                 / self.max_episode_length
                 > self.cfg.commands.curriculum_threshold
                 * self.reward_scales["tracking_lin_vel"]
+            ) & (
+                self.episode_sums["tracking_ang_vel"][self.success_ids]
+                / self.max_episode_length
+                > self.cfg.commands.curriculum_threshold
+                * self.reward_scales["tracking_ang_vel"]
             )
             success_ids = self.success_ids[mask]
             basic_ids = torch.any(
                 success_ids.unsqueeze(1) == self.basic_terrain_idx.unsqueeze(0), dim=1
             )
             basic_ids = success_ids[basic_ids]
-            self.command_ranges["lin_vel_x"][success_ids, 0] -= 0.05
-            self.command_ranges["lin_vel_x"][success_ids, 1] += 0.05
-            self.command_ranges["lin_vel_x"][basic_ids, 0] -= 0.45
-            self.command_ranges["lin_vel_x"][basic_ids, 1] += 0.45
-
-            self.command_ranges["lin_vel_x"][self.basic_terrain_idx, :] = torch.clip(
-                self.command_ranges["lin_vel_x"][self.basic_terrain_idx, :],
-                -self.cfg.commands.basic_max_curriculum,
-                self.cfg.commands.basic_max_curriculum,
+            self._grow_command_range(
+                "lin_vel_x", success_ids, basic_ids, advanced_step=0.05, basic_extra=0.45
             )
-            self.command_ranges["lin_vel_x"][self.advanced_terrain_idx, :] = torch.clip(
-                self.command_ranges["lin_vel_x"][self.advanced_terrain_idx, :],
-                -self.cfg.commands.advanced_max_curriculum,
+            self._grow_command_range(
+                "ang_vel_yaw",
+                success_ids,
+                basic_ids,
+                advanced_step=0.1,
+                basic_extra=0.4,
+            )
+            self._clip_command_range(
+                "lin_vel_x",
+                self.cfg.commands.basic_max_curriculum,
                 self.cfg.commands.advanced_max_curriculum,
             )
-        if self.cfg.terrain.curriculum == False:
+            self._clip_command_range(
+                "ang_vel_yaw",
+                self.cfg.commands.basic_max_ang_vel_curriculum,
+                self.cfg.commands.advanced_max_ang_vel_curriculum,
+            )
+        if not self.cfg.terrain.curriculum:
             if (
                 torch.mean(self.episode_sums["tracking_lin_vel"][env_ids])
                 / self.max_episode_length
@@ -1044,6 +1060,55 @@ class LeggedRobot(BaseTask):
                     0.0,
                     self.cfg.commands.basic_max_curriculum,
                 )
+                self.command_ranges["ang_vel_yaw"][:, 0] = torch.clip(
+                    self.command_ranges["ang_vel_yaw"][:, 0] - 0.2,
+                    -self.cfg.commands.basic_max_ang_vel_curriculum,
+                    0.0,
+                )
+                self.command_ranges["ang_vel_yaw"][:, 1] = torch.clip(
+                    self.command_ranges["ang_vel_yaw"][:, 1] + 0.2,
+                    0.0,
+                    self.cfg.commands.basic_max_ang_vel_curriculum,
+                )
+
+    def _shrink_command_range(self, command_name, env_ids, step, min_abs, max_abs):
+        if len(env_ids) == 0:
+            return
+        self.command_ranges[command_name][env_ids, 0] = torch.clip(
+            self.command_ranges[command_name][env_ids, 0] + step,
+            -max_abs,
+            -min_abs,
+        )
+        self.command_ranges[command_name][env_ids, 1] = torch.clip(
+            self.command_ranges[command_name][env_ids, 1] - step,
+            min_abs,
+            max_abs,
+        )
+
+    def _grow_command_range(
+        self, command_name, success_ids, basic_ids, advanced_step, basic_extra
+    ):
+        if len(success_ids) == 0:
+            return
+        self.command_ranges[command_name][success_ids, 0] -= advanced_step
+        self.command_ranges[command_name][success_ids, 1] += advanced_step
+        if len(basic_ids) != 0:
+            self.command_ranges[command_name][basic_ids, 0] -= basic_extra
+            self.command_ranges[command_name][basic_ids, 1] += basic_extra
+
+    def _clip_command_range(self, command_name, basic_max, advanced_max):
+        if len(self.basic_terrain_idx) != 0:
+            self.command_ranges[command_name][self.basic_terrain_idx, :] = torch.clip(
+                self.command_ranges[command_name][self.basic_terrain_idx, :],
+                -basic_max,
+                basic_max,
+            )
+        if len(self.advanced_terrain_idx) != 0:
+            self.command_ranges[command_name][self.advanced_terrain_idx, :] = torch.clip(
+                self.command_ranges[command_name][self.advanced_terrain_idx, :],
+                -advanced_max,
+                advanced_max,
+            )
 
     def _get_noise_scale_vec(self, cfg):
         """Sets a vector used to scale the noise added to the observations.
@@ -1616,86 +1681,7 @@ class LeggedRobot(BaseTask):
                 (self.num_envs / self.cfg.terrain.num_cols),
                 rounding_mode="floor",
             ).to(torch.long)
-            # num_cols = 20
-            # terrain types: [flat, smooth slope, rough slope, stairs up,
-            # stairs down, advanced column 18, advanced column 19]. The last
-            # two columns are remapped by custom_terrain_mode below.
-            # terrain columns: [0..3, 4..7, 8..11, 12..13, 14..17, 18, 19]
-            # terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
-            self.flat_idx = (self.terrain_types < 4).nonzero(as_tuple=False).flatten()
-            self.smooth_slope_idx = (
-                ((4 <= self.terrain_types) * (self.terrain_types < 8))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            self.rough_slope_idx = (
-                ((8 <= self.terrain_types) * (self.terrain_types < 12))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            self.stair_up_idx = (
-                ((12 <= self.terrain_types) * (self.terrain_types < 14))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            self.stair_down_idx = (
-                ((14 <= self.terrain_types) * (self.terrain_types < 18))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            empty_terrain_idx = self.terrain_types[:0]
-            column_18_idx = (
-                ((18 <= self.terrain_types) * (self.terrain_types < 19))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            column_19_idx = (
-                ((19 <= self.terrain_types) * (self.terrain_types < 20))
-                .nonzero(as_tuple=False)
-                .flatten()
-            )
-            if self.cfg.terrain.custom_terrain_mode == "bidirectional_focus":
-                split_column = self.cfg.terrain.num_cols // 2
-                self.flat_idx = empty_terrain_idx
-                self.smooth_slope_idx = empty_terrain_idx
-                self.rough_slope_idx = empty_terrain_idx
-                self.stair_up_idx = empty_terrain_idx
-                self.stair_down_idx = empty_terrain_idx
-                self.discrete_idx = empty_terrain_idx
-                self.custom_curb_drop_idx = (
-                    (self.terrain_types < split_column)
-                    .nonzero(as_tuple=False)
-                    .flatten()
-                )
-                self.custom_reverse_climb_idx = (
-                    (self.terrain_types >= split_column)
-                    .nonzero(as_tuple=False)
-                    .flatten()
-                )
-            elif self.cfg.terrain.custom_terrain_mode == "bidirectional":
-                self.discrete_idx = empty_terrain_idx
-                self.custom_curb_drop_idx = column_18_idx
-                self.custom_reverse_climb_idx = column_19_idx
-            else:
-                self.discrete_idx = column_18_idx
-                self.custom_curb_drop_idx = column_19_idx
-                self.custom_reverse_climb_idx = empty_terrain_idx
-            self.basic_terrain_idx = torch.cat(
-                (
-                    self.flat_idx,
-                    self.smooth_slope_idx,
-                    self.rough_slope_idx,
-                    self.stair_down_idx,
-                )
-            )
-            self.advanced_terrain_idx = torch.cat(
-                (
-                    self.stair_up_idx,
-                    self.discrete_idx,
-                    self.custom_curb_drop_idx,
-                    self.custom_reverse_climb_idx,
-                )
-            )
+            self._init_terrain_type_indices()
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = (
                 torch.from_numpy(self.terrain.env_origins)
@@ -1729,6 +1715,100 @@ class LeggedRobot(BaseTask):
             self.env_origins[:, 1] = spacing * yy.flatten()[: self.num_envs]
             self.env_origins[:, 2] = 0.0
             self.flat_idx = torch.arange(self.num_envs, device=self.device)
+            empty_idx = self.flat_idx[:0]
+            self.smooth_slope_idx = empty_idx
+            self.rough_slope_idx = empty_idx
+            self.stair_up_idx = empty_idx
+            self.stair_down_idx = empty_idx
+            self.discrete_idx = empty_idx
+            self.custom_curb_drop_idx = empty_idx
+            self.custom_reverse_climb_idx = empty_idx
+            self.basic_terrain_idx = self.flat_idx
+            self.advanced_terrain_idx = empty_idx
+
+    def _init_terrain_type_indices(self):
+        """Map environments to terrain classes from the configured proportions.
+
+        The previous implementation assumed one fixed 20-column distribution.
+        Staged training changes that distribution, so curriculum groups must be
+        derived from the same cumulative thresholds used by Terrain.make_terrain.
+        """
+        names = (
+            "flat",
+            "smooth_slope",
+            "rough_slope",
+            "stair_down",
+            "stair_up",
+            "discrete",
+            "custom_curb_drop",
+            "custom_reverse_climb",
+        )
+        empty_idx = self.terrain_types[:0]
+        grouped = {name: [] for name in names}
+        proportions = np.cumsum(self.cfg.terrain.terrain_proportions).tolist()
+
+        def threshold(index):
+            if not proportions:
+                return 0.0
+            return proportions[index] if index < len(proportions) else proportions[-1]
+
+        for column in range(self.cfg.terrain.num_cols):
+            choice = column / self.cfg.terrain.num_cols + 0.001
+            if self.cfg.terrain.custom_terrain_mode == "bidirectional_focus":
+                terrain_name = (
+                    "custom_curb_drop"
+                    if column < self.cfg.terrain.num_cols // 2
+                    else "custom_reverse_climb"
+                )
+            elif choice < threshold(0):
+                terrain_name = "flat"
+            elif choice < threshold(1):
+                terrain_name = "smooth_slope"
+            elif choice < threshold(2):
+                terrain_name = "rough_slope"
+            elif choice < threshold(4):
+                terrain_name = "stair_down" if choice < threshold(3) else "stair_up"
+            elif choice < threshold(5):
+                split = threshold(4) + 0.5 * (threshold(5) - threshold(4))
+                if self.cfg.terrain.custom_terrain_mode == "bidirectional":
+                    terrain_name = (
+                        "custom_curb_drop"
+                        if choice < split
+                        else "custom_reverse_climb"
+                    )
+                else:
+                    terrain_name = "discrete" if choice < split else "custom_curb_drop"
+            else:
+                # Current six-entry configs sum to one. Keep any trailing
+                # numerical edge case in the advanced group.
+                terrain_name = "discrete"
+
+            env_ids = (self.terrain_types == column).nonzero(as_tuple=False).flatten()
+            if len(env_ids) != 0:
+                grouped[terrain_name].append(env_ids)
+
+        for name in names:
+            terrain_idx = (
+                torch.cat(grouped[name]) if grouped[name] else empty_idx
+            )
+            setattr(self, f"{name}_idx", terrain_idx)
+
+        self.basic_terrain_idx = torch.cat(
+            (
+                self.flat_idx,
+                self.smooth_slope_idx,
+                self.rough_slope_idx,
+                self.stair_down_idx,
+            )
+        )
+        self.advanced_terrain_idx = torch.cat(
+            (
+                self.stair_up_idx,
+                self.discrete_idx,
+                self.custom_curb_drop_idx,
+                self.custom_reverse_climb_idx,
+            )
+        )
 
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt
