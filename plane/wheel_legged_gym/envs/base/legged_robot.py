@@ -706,6 +706,26 @@ class LeggedRobot(BaseTask):
         ][
             env_ids, 0
         ]
+        if self.cfg.commands.command_profile == "flat_highspeed":
+            # 60% translation: full vx and 20% yaw.
+            # 30% spin: full yaw and 10% vx.
+            # 10% mixed: half of both sampled commands.
+            profile = torch.rand(len(env_ids), device=self.device)
+            translation = profile < 0.60
+            spin = (0.60 <= profile) & (profile < 0.90)
+            mixed = profile >= 0.90
+            self.commands[env_ids[translation], 1] *= 0.20
+            self.commands[env_ids[spin], 0] *= 0.10
+            self.commands[env_ids[mixed], :2] *= 0.50
+        elif self.cfg.commands.command_profile == "flat_highspeed_combined":
+            # 55% keeps the independently sampled full vx/yaw pair, explicitly
+            # training fast curved motion. The remaining samples preserve pure
+            # translation and near-in-place spin performance.
+            profile = torch.rand(len(env_ids), device=self.device)
+            translation = profile < 0.25
+            spin = (0.25 <= profile) & (profile < 0.45)
+            self.commands[env_ids[translation], 1] *= 0.20
+            self.commands[env_ids[spin], 0] *= 0.10
         self.commands[env_ids, 2] = (
             self.command_ranges["height"][env_ids, 1]
             - self.command_ranges["height"][env_ids, 0]

@@ -75,8 +75,10 @@ class LeggedRobotCfg(BaseConfig):
         fail_to_terminal_time_s = 1
 
     class terrain:
-        # mesh_type = "trimesh"  # "heightfield" # none, plane, heightfield or trimesh
-        mesh_type = "trimesh"
+        # none, plane, heightfield or trimesh
+        mesh_type = _env_choice(
+            "WLG_MESH_TYPE", "trimesh", {"none", "plane", "heightfield", "trimesh"}
+        )
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 25  # [m]
@@ -142,6 +144,14 @@ class LeggedRobotCfg(BaseConfig):
         # reverse-climb stage sets this to 0.33 m through an environment variable.
         reverse_climb_fixed_height = _env_float(
             "WLG_REVERSE_CLIMB_FIXED_HEIGHT", -1.0
+        )
+        # independent preserves the original sampler. flat_highspeed emphasizes
+        # separate translation/spin limits. flat_highspeed_combined makes full
+        # forward-and-turn commands the majority while retaining both endpoints.
+        command_profile = _env_choice(
+            "WLG_COMMAND_PROFILE",
+            "independent",
+            {"independent", "flat_highspeed", "flat_highspeed_combined"},
         )
 
         class ranges:
