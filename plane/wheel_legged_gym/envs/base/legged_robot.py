@@ -2023,6 +2023,19 @@ class LeggedRobot(BaseTask):
             dim=1,
         )
 
+    def _reward_wheel_support(self):
+        """Reward support by both wheels without chassis or leg contact."""
+        wheel_contact = torch.norm(
+            self.contact_forces[:, self.feet_indices, :], dim=-1
+        ) > 1.0
+        unwanted_contact = torch.norm(
+            self.contact_forces[:, self.penalised_contact_indices, :], dim=-1
+        ) > 1.0
+        return (
+            torch.all(wheel_contact, dim=1)
+            & ~torch.any(unwanted_contact, dim=1)
+        ).float()
+
     def _reward_recovery_pose(self):
         """Dense guidance from the prone reference to a known standing pose."""
         leg_pos = self.dof_pos[:, [0, 1, 3, 4]]

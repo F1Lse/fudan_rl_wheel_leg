@@ -1,18 +1,13 @@
-# 长腿车型历史训练流程（自动续训）
+# 长腿车型平地平衡训练流程（自动续训）
 
-这个脚本先增加两个长腿车型必需的起身阶段，再按旧模型的实际演变顺序训练同一个策略，每阶段增加 2000 轮：
+当前流程只训练平地起身、平衡、高度和低速运动，不加入楼梯或随机地形。四个阶段连续训练同一个策略：
 
-1. `起身第1步`：从趴姿收腿到用户验证的低位轮式平衡姿态 `q=[0.0, 0.8, 0.0, -0.8]`，固定低位高度约 0.20 m。
-2. `起身第2步`：继承低位起身策略，在轮式平衡基础上抬升到 `q=[0.2, 0.4, -0.2, -0.4]` 和约 0.28 m 高度。
-3. `上台阶1`：平地，速度/转向 ±2，高度 0.10–0.33 m。
-4. `上台阶2`：只训练上下楼梯，高度 0.23–0.33 m。
-5. `上台阶3`：楼梯线速度扩大到 ±2.3 m/s，并加强速度跟踪。
-6. `上台阶3_angz+`：转向扩大到 ±5 rad/s，高度扩大到 0.17–0.33 m。
-7. `随机地形 v1`：30% 平地、20% 斜坡、30% 下楼梯、20% 上楼梯，开启速度课程。
-8. `随机地形 v2`：保持相同配置继续收敛。
-9. `随机地形 v3`：课程线速度上限提高到 2.8 m/s，命令保持时间改为 10 s。
+1. `0–3000`：从趴姿收腿到用户验证的低位轮式平衡姿态 `q=[0.0, 0.8, 0.0, -0.8]`，固定低位高度约 0.20 m。
+2. `3000–6000`：继承低位起身策略，在轮式平衡基础上抬升到 `q=[0.2, 0.4, -0.2, -0.4]` 和约 0.28 m 高度。
+3. `6000–10000`：零线速度、零转向，随机高度 0.16–0.30 m，每 3 s 更换一次高度命令。
+4. `10000–14000`：随机高度 0.16–0.30 m，线速度和转向均为 -1.0–1.0，训练低速移动中的高度和平衡。
 
-历史训练的默认关节角、PD 和强域随机化会保持一致；长腿 URDF 使用当前车型设置。出生高度采用 Isaac Gym 实测正常的 0.12 m，使机器人从贴近趴姿的位置开始，而不是先从空中落下。
+训练保持部署使用的默认关节角、PD 和强域随机化；长腿 URDF 使用当前车型设置。出生高度采用 Isaac Gym 实测正常的 0.12 m，使机器人从贴近趴姿的位置开始，而不是先从空中落下。起身和平衡阶段还会奖励“双轮接地且底盘、腿部不接地”。
 
 ## 使用
 
@@ -35,7 +30,7 @@ bash scripts/historical_curriculum.sh status
 bash scripts/historical_curriculum.sh train
 ```
 
-可随时按 `Ctrl+C`。模型默认每 100 轮保存一次，因此中断后最多损失不足 100 轮的进度。重新运行同一条 `train` 命令，会自动查找最新检查点并补足本阶段剩余轮数。脚本采用新的 `hist_recovery_v4_longlegs_*` 目录，不会接入此前未学会起身的 recovery 检查点、失败的平地 2000 轮或原来的 17000 轮训练。
+可随时按 `Ctrl+C`。模型默认每 100 轮保存一次，因此中断后最多损失不足 100 轮的进度。重新运行同一条 `train` 命令，会自动查找最新检查点并补足本阶段剩余轮数。当前 `hist_recovery_v4_longlegs_s01_recovery_low` 检查点会继续使用，因此已经完成的 200 多轮不会丢失；旧的失败 recovery 和原来的 17000 轮模型不会混入。
 
 中断训练后，自动用最新检查点进行 Isaac Gym 验证：
 
@@ -43,10 +38,10 @@ bash scripts/historical_curriculum.sh train
 bash scripts/historical_curriculum.sh play
 ```
 
-也可以指定某个累计检查点，例如验证第一阶段的低位起身模型：
+也可以指定某个累计检查点，例如验证第一阶段的低位平衡模型：
 
 ```bash
-bash scripts/historical_curriculum.sh play 2000
+bash scripts/historical_curriculum.sh play 3000
 ```
 
 默认显示 5 台机器人；可以临时修改：
@@ -59,7 +54,7 @@ Play 默认保留训练时的噪声、质量、质心、摩擦、PD、动作延�
 
 ```bash
 WLG_PLAY_WITH_RANDOMIZATION=0 \
-  bash scripts/historical_curriculum.sh play 2000
+  bash scripts/historical_curriculum.sh play 3000
 ```
 
 验证后继续：
@@ -74,10 +69,10 @@ bash scripts/historical_curriculum.sh train
 bash scripts/historical_curriculum.sh export
 ```
 
-默认输出为 `export_onnx/historical_longlegs_model_<轮数>.onnx`。如需指定名称：
+默认输出为 `export_onnx/plane_balance_longlegs_model_<轮数>.onnx`。如需指定名称：
 
 ```bash
-WLG_EXPORT_OUT=export_onnx/longlegs_historical_final.onnx \
+WLG_EXPORT_OUT=export_onnx/longlegs_plane_balance_final.onnx \
   bash scripts/historical_curriculum.sh export
 ```
 

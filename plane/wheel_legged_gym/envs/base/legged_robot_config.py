@@ -352,6 +352,7 @@ class LeggedRobotCfg(BaseConfig):
             action_smooth = _env_float("WLG_ACTION_SMOOTH_SCALE", -0.01)
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
+            wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
             recovery_pose = _env_float("WLG_RECOVERY_POSE_SCALE", 0.0)
             # The previous policy deliberately drove both knee joints into their
             # hard stops; make that behavior substantially more expensive.

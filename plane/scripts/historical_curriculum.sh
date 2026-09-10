@@ -7,41 +7,26 @@ LOG_ROOT="$PLANE_ROOT/logs/wheel_legged"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-5}"
 
-# Each target is an absolute checkpoint number. Every stage therefore adds
-# exactly 2000 PPO iterations, including after an interrupted/resumed run.
+# Each target is an absolute checkpoint number. Interrupted stages therefore
+# resume from the newest checkpoint without repeating completed iterations.
 STAGE_KEYS=(
   recovery_low
   recovery_raise
-  flat_base
-  stairs_base
-  stairs_speed
-  stairs_yaw
-  mixed_v1
-  mixed_v2
-  mixed_v3
+  height_balance
+  slow_motion
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
   "起身第2步：低位平衡后抬升机身"
-  "上台阶1：平地基础"
-  "上台阶2：上下楼梯"
-  "上台阶3：楼梯速度强化"
-  "angz+：楼梯转向强化"
-  "随机地形 v1"
-  "随机地形 v2"
-  "随机地形 v3：速度上限 2.8"
+  "纯平地：零速度多高度平衡"
+  "纯平地：多高度低速行驶与转向"
 )
-STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000 18000)
+STAGE_TARGETS=(3000 6000 10000 14000)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
-  hist_recovery_v4_longlegs_s03_flat_base
-  hist_recovery_v4_longlegs_s04_stairs_base
-  hist_recovery_v4_longlegs_s05_stairs_speed
-  hist_recovery_v4_longlegs_s06_stairs_yaw
-  hist_recovery_v4_longlegs_s07_mixed_v1
-  hist_recovery_v4_longlegs_s08_mixed_v2
-  hist_recovery_v4_longlegs_s09_mixed_v3
+  hist_recovery_v4_longlegs_s03_height_balance
+  hist_recovery_v4_longlegs_s04_slow_motion
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -155,6 +140,7 @@ apply_common_environment() {
   export WLG_LIN_VEL_Z_SCALE=-0.1
   export WLG_TORQUES_SCALE=-0.0001
   export WLG_COLLISION_SCALE=-1.0
+  export WLG_WHEEL_SUPPORT_SCALE=0.0
   export WLG_DOF_POS_LIMITS_SCALE=-1.0
   export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
   export WLG_RECOVERY_MODE=0
@@ -169,9 +155,9 @@ apply_stage_environment() {
   local stage_index="$1"
   apply_common_environment
 
-  # Defaults shared by historical stages 1-4.
-  export WLG_MESH_TYPE=trimesh
-  export WLG_TERRAIN_PROPORTIONS=0.0,0.0,0.0,0.5,0.5,0.0
+  # All stages in this focused curriculum use flat ground.
+  export WLG_MESH_TYPE=plane
+  export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
   export WLG_COMMAND_CURRICULUM=0
   export WLG_BASIC_MAX_CURRICULUM=2.5
   export WLG_ADVANCED_MAX_CURRICULUM=1.5
@@ -216,7 +202,8 @@ apply_stage_environment() {
       # enhanced term saturated at -1. Use an unsaturated L1 error instead.
       export WLG_BASE_HEIGHT_SCALE=-2.0
       export WLG_BASE_HEIGHT_ENHANCE_SCALE=0.0
-      export WLG_COLLISION_SCALE=-0.2
+      export WLG_COLLISION_SCALE=-1.0
+      export WLG_WHEEL_SUPPORT_SCALE=2.0
       export WLG_NOMINAL_STATE_SCALE=0.0
       export WLG_ORIENTATION_SCALE=-2.0
       export WLG_ANG_VEL_XY_SCALE=-0.2
@@ -243,67 +230,39 @@ apply_stage_environment() {
         export WLG_RECOVERY_POSE_SCALE=-0.25
       fi
       ;;
-    flat_base)
-      export WLG_MESH_TYPE=plane
-      export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
-      export WLG_HEIGHT_MIN=0.10
-      export WLG_HEIGHT_MAX=0.33
-      ;;
-    stairs_base)
-      ;;
-    stairs_speed)
-      export WLG_LIN_VEL_X_MIN=-2.3
-      export WLG_LIN_VEL_X_MAX=2.3
-      export WLG_TRACKING_LIN_VEL_SCALE=1.5
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
-      export WLG_BASE_HEIGHT_SCALE=1.0
-      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.0
-      export WLG_OBS_LIN_VEL_SCALE=3.0
-      ;;
-    stairs_yaw)
-      export WLG_LIN_VEL_X_MIN=-2.3
-      export WLG_LIN_VEL_X_MAX=2.3
-      export WLG_ANG_VEL_YAW_MIN=-5.0
-      export WLG_ANG_VEL_YAW_MAX=5.0
-      export WLG_HEIGHT_MIN=0.17
-      export WLG_TRACKING_LIN_VEL_SCALE=1.5
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
-      export WLG_BASE_HEIGHT_SCALE=1.0
-      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.0
-      export WLG_OBS_LIN_VEL_SCALE=3.0
-      ;;
-    mixed_v1|mixed_v2|mixed_v3)
-      export WLG_TERRAIN_PROPORTIONS=0.3,0.2,0.0,0.3,0.2,0.0
-      export WLG_COMMAND_CURRICULUM=1
-      export WLG_BASIC_MAX_CURRICULUM=2.5
-      export WLG_ADVANCED_MAX_CURRICULUM=2.5
-      export WLG_LIN_VEL_X_MIN=-2.0
-      export WLG_LIN_VEL_X_MAX=2.0
-      export WLG_ANG_VEL_YAW_MIN=-4.0
-      export WLG_ANG_VEL_YAW_MAX=4.0
-      export WLG_HEIGHT_MIN=0.09
-      export WLG_HEIGHT_MAX=0.33
-      # Historical code multiplied both linear tracking functions by 1.3.
-      export WLG_TRACKING_LIN_VEL_SCALE=1.3
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.3
-      export WLG_BASE_HEIGHT_SCALE=1.0
-      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.0
-      export WLG_ANG_VEL_XY_SCALE=-0.05
-      export WLG_ORIENTATION_SCALE=-20.0
-      export WLG_DOF_VEL_SCALE=-2e-5
-      export WLG_DOF_ACC_SCALE=-1e-7
+    height_balance|slow_motion)
+      export WLG_RECOVERY_MODE=1
+      export WLG_COMMAND_CURRICULUM=0
+      export WLG_HEIGHT_MIN=0.16
+      export WLG_HEIGHT_MAX=0.30
+      export WLG_COMMAND_RESAMPLING_TIME=3.0
+      export WLG_COLLISION_SCALE=-1.0
+      export WLG_WHEEL_SUPPORT_SCALE=2.0
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_ANG_VEL_XY_SCALE=-0.1
+      export WLG_BASE_HEIGHT_SCALE=2.0
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_RECOVERY_POSE_SCALE=0.0
       export WLG_ACTION_RATE_SCALE=-0.01
       export WLG_ACTION_SMOOTH_SCALE=-0.01
-      export WLG_OBS_LIN_VEL_SCALE=3.0
-      if [[ "${STAGE_KEYS[$stage_index]}" == mixed_v3 ]]; then
-        export WLG_BASIC_MAX_CURRICULUM=2.8
-        export WLG_ADVANCED_MAX_CURRICULUM=2.8
-        export WLG_COMMAND_RESAMPLING_TIME=10.0
-        export WLG_ANG_VEL_XY_SCALE=-0.07
-        export WLG_DOF_VEL_SCALE=-5e-5
-        export WLG_DOF_ACC_SCALE=-2.5e-7
-        export WLG_ACTION_RATE_SCALE=-0.05
-        export WLG_ACTION_SMOOTH_SCALE=-0.05
+      if [[ "${STAGE_KEYS[$stage_index]}" == height_balance ]]; then
+        export WLG_LIN_VEL_X_MIN=0.0
+        export WLG_LIN_VEL_X_MAX=0.0
+        export WLG_ANG_VEL_YAW_MIN=0.0
+        export WLG_ANG_VEL_YAW_MAX=0.0
+        export WLG_TRACKING_LIN_VEL_SCALE=0.0
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
+        export WLG_TRACKING_ANG_VEL_SCALE=0.0
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      else
+        export WLG_LIN_VEL_X_MIN=-1.0
+        export WLG_LIN_VEL_X_MAX=1.0
+        export WLG_ANG_VEL_YAW_MIN=-1.0
+        export WLG_ANG_VEL_YAW_MAX=1.0
+        export WLG_TRACKING_LIN_VEL_SCALE=1.0
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.0
+        export WLG_TRACKING_ANG_VEL_SCALE=1.0
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
       fi
       ;;
     *)
@@ -464,7 +423,7 @@ export_latest() {
   fi
   check_python_environment
   run_dir="$(basename "$(dirname "$path")")"
-  output_path="${WLG_EXPORT_OUT:-$PLANE_ROOT/export_onnx/historical_longlegs_model_${iter}.onnx}"
+  output_path="${WLG_EXPORT_OUT:-$PLANE_ROOT/export_onnx/plane_balance_longlegs_model_${iter}.onnx}"
   cd "$PLANE_ROOT"
   "$PYTHON_BIN" export_onnx/export_onnx.py \
     --load_run="$run_dir" \
