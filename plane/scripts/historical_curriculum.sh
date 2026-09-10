@@ -31,14 +31,14 @@ STAGE_LABELS=(
 )
 STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000)
 STAGE_RUN_NAMES=(
-  hist_recovery_longlegs_s01_recovery
-  hist_recovery_longlegs_s02_flat_base
-  hist_recovery_longlegs_s03_stairs_base
-  hist_recovery_longlegs_s04_stairs_speed
-  hist_recovery_longlegs_s05_stairs_yaw
-  hist_recovery_longlegs_s06_mixed_v1
-  hist_recovery_longlegs_s07_mixed_v2
-  hist_recovery_longlegs_s08_mixed_v3
+  hist_recovery_v2_longlegs_s01_recovery
+  hist_recovery_v2_longlegs_s02_flat_base
+  hist_recovery_v2_longlegs_s03_stairs_base
+  hist_recovery_v2_longlegs_s04_stairs_speed
+  hist_recovery_v2_longlegs_s05_stairs_yaw
+  hist_recovery_v2_longlegs_s06_mixed_v1
+  hist_recovery_v2_longlegs_s07_mixed_v2
+  hist_recovery_v2_longlegs_s08_mixed_v3
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -155,6 +155,8 @@ apply_common_environment() {
   export WLG_DOF_POS_LIMITS_SCALE=-1.0
   export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
   export WLG_RECOVERY_MODE=0
+  export WLG_INIT_NOISE_STD=0.5
+  export WLG_ENTROPY_COEF=0.01
 }
 
 apply_stage_environment() {
@@ -205,10 +207,19 @@ apply_stage_environment() {
       export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
       export WLG_TRACKING_ANG_VEL_SCALE=0.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      # The positive Gaussian was effectively zero far from 0.20 m and its
+      # enhanced term saturated at -1. Use an unsaturated L1 error instead.
+      export WLG_BASE_HEIGHT_SCALE=-2.0
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=0.0
       export WLG_COLLISION_SCALE=0.0
       export WLG_NOMINAL_STATE_SCALE=0.0
-      export WLG_ACTION_RATE_SCALE=-0.01
-      export WLG_ACTION_SMOOTH_SCALE=-0.01
+      export WLG_ORIENTATION_SCALE=-1.0
+      export WLG_ANG_VEL_XY_SCALE=-0.1
+      export WLG_DOF_POS_LIMITS_SCALE=-0.2
+      export WLG_ACTION_RATE_SCALE=-0.001
+      export WLG_ACTION_SMOOTH_SCALE=-0.001
+      export WLG_INIT_NOISE_STD=1.0
+      export WLG_ENTROPY_COEF=0.02
       ;;
     flat_base)
       export WLG_MESH_TYPE=plane

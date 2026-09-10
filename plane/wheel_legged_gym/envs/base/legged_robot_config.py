@@ -425,7 +425,7 @@ class LeggedRobotCfgPPO(BaseConfig):
     runner_class_name = "OnPolicyRunner"
 
     class policy:
-        init_noise_std = 0.5
+        init_noise_std = _env_float("WLG_INIT_NOISE_STD", 0.5)
         actor_hidden_dims = [128, 64, 32]
         critic_hidden_dims = [256, 128, 64]
         activation = "elu"  # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -442,7 +442,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         value_loss_coef = 1.0
         use_clipped_value_loss = True
         clip_param = 0.2
-        entropy_coef = 0.01
+        entropy_coef = _env_float("WLG_ENTROPY_COEF", 0.01)
         num_learning_epochs = 5
         num_mini_batches = 4  # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 1.0e-3  # 5.e-4
