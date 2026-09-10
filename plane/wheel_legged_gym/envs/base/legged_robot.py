@@ -1372,6 +1372,11 @@ class LeggedRobot(BaseTask):
                     print(
                         f"PD gain of joint {name} were not defined, setting them to zero"
                     )
+        self.recovery_joint_target = to_torch(
+            self.cfg.rewards.recovery_joint_target,
+            device=self.device,
+            requires_grad=False,
+        ).unsqueeze(0)
         if self.cfg.domain_rand.randomize_Kp:
             (
                 p_gains_scale_min,
@@ -2017,6 +2022,11 @@ class LeggedRobot(BaseTask):
             ),
             dim=1,
         )
+
+    def _reward_recovery_pose(self):
+        """Dense guidance from the prone reference to a known standing pose."""
+        leg_pos = self.dof_pos[:, [0, 1, 3, 4]]
+        return torch.mean(torch.abs(leg_pos - self.recovery_joint_target), dim=1)
 
     def _reward_termination(self):
         # Terminal reward / penalty

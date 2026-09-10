@@ -352,6 +352,7 @@ class LeggedRobotCfg(BaseConfig):
             action_smooth = _env_float("WLG_ACTION_SMOOTH_SCALE", -0.01)
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
+            recovery_pose = _env_float("WLG_RECOVERY_POSE_SCALE", 0.0)
             # The previous policy deliberately drove both knee joints into their
             # hard stops; make that behavior substantially more expensive.
             dof_pos_limits = _env_float("WLG_DOF_POS_LIMITS_SCALE", -5.0)
@@ -365,6 +366,9 @@ class LeggedRobotCfg(BaseConfig):
         soft_dof_vel_limit = 1.0
         soft_torque_limit = 1.0
         base_height_target = 0.18
+        recovery_joint_target = _env_float_list(
+            "WLG_RECOVERY_JOINT_TARGET", [0.2, 0.4, -0.2, -0.4]
+        )
         max_contact_force = 100.0  # forces above this value are penalized
 
     class normalization:

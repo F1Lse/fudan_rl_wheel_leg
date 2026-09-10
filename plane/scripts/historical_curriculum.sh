@@ -31,14 +31,14 @@ STAGE_LABELS=(
 )
 STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000)
 STAGE_RUN_NAMES=(
-  hist_recovery_v2_longlegs_s01_recovery
-  hist_recovery_v2_longlegs_s02_flat_base
-  hist_recovery_v2_longlegs_s03_stairs_base
-  hist_recovery_v2_longlegs_s04_stairs_speed
-  hist_recovery_v2_longlegs_s05_stairs_yaw
-  hist_recovery_v2_longlegs_s06_mixed_v1
-  hist_recovery_v2_longlegs_s07_mixed_v2
-  hist_recovery_v2_longlegs_s08_mixed_v3
+  hist_recovery_v3_longlegs_s01_recovery
+  hist_recovery_v3_longlegs_s02_flat_base
+  hist_recovery_v3_longlegs_s03_stairs_base
+  hist_recovery_v3_longlegs_s04_stairs_speed
+  hist_recovery_v3_longlegs_s05_stairs_yaw
+  hist_recovery_v3_longlegs_s06_mixed_v1
+  hist_recovery_v3_longlegs_s07_mixed_v2
+  hist_recovery_v3_longlegs_s08_mixed_v3
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -157,6 +157,9 @@ apply_common_environment() {
   export WLG_RECOVERY_MODE=0
   export WLG_INIT_NOISE_STD=0.5
   export WLG_ENTROPY_COEF=0.01
+  export WLG_RECOVERY_POSE_SCALE=0.0
+  export WLG_RECOVERY_JOINT_TARGET=0.2,0.4,-0.2,-0.4
+  export WLG_INITIAL_ACTOR_BIAS=""
 }
 
 apply_stage_environment() {
@@ -199,8 +202,10 @@ apply_stage_environment() {
       export WLG_LIN_VEL_X_MAX=0.0
       export WLG_ANG_VEL_YAW_MIN=0.0
       export WLG_ANG_VEL_YAW_MAX=0.0
-      export WLG_HEIGHT_MIN=0.20
-      export WLG_HEIGHT_MAX=0.20
+      # This joint pose was observed at about 0.28 m and is known to be
+      # mechanically feasible. Lower-height tracking is learned later.
+      export WLG_HEIGHT_MIN=0.28
+      export WLG_HEIGHT_MAX=0.28
       # Do not reward lying still merely because zero velocity is tracked.
       # Recovery is driven by upright orientation and commanded base height.
       export WLG_TRACKING_LIN_VEL_SCALE=0.0
@@ -216,9 +221,12 @@ apply_stage_environment() {
       export WLG_ORIENTATION_SCALE=-1.0
       export WLG_ANG_VEL_XY_SCALE=-0.1
       export WLG_DOF_POS_LIMITS_SCALE=-0.2
+      export WLG_RECOVERY_POSE_SCALE=-0.5
       export WLG_ACTION_RATE_SCALE=-0.001
       export WLG_ACTION_SMOOTH_SCALE=-0.001
-      export WLG_INIT_NOISE_STD=1.0
+      # action=(standing_q-default_q)/pos_action_scale
+      export WLG_INITIAL_ACTOR_BIAS=0.86,2.10,0.0,-0.86,-2.10,0.0
+      export WLG_INIT_NOISE_STD=0.5
       export WLG_ENTROPY_COEF=0.02
       ;;
     flat_base)
