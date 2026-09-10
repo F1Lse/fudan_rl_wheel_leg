@@ -113,11 +113,12 @@ class LeggedRobotCfg(BaseConfig):
         # descent_discrete: column 18 is the original discrete-obstacle terrain
         # and column 19 is the curb/double-drop course used through model 7000.
         # bidirectional: columns 18/19 become the descending and reverse-climb
-        # versions of that measured course, respectively.
+        # versions of that measured course, respectively. bidirectional_focus
+        # dedicates all columns equally to those two courses for fine-tuning.
         custom_terrain_mode = _env_choice(
             "WLG_CUSTOM_TERRAIN_MODE",
             "descent_discrete",
-            {"descent_discrete", "bidirectional"},
+            {"descent_discrete", "bidirectional", "bidirectional_focus"},
         )
         # trimesh only:
         # A 50 mm rise over one 100 mm horizontal cell has slope 0.5. Keep the
@@ -129,12 +130,19 @@ class LeggedRobotCfg(BaseConfig):
         # Height-extension stage: keep locomotion commands bounded while the
         # policy extends its learned height response above 0.24 m.
         curriculum = _env_bool("WLG_COMMAND_CURRICULUM", False)
-        basic_max_curriculum = 2.5
-        advanced_max_curriculum = 1.5
+        basic_max_curriculum = _env_float("WLG_BASIC_MAX_CURRICULUM", 2.5)
+        advanced_max_curriculum = _env_float(
+            "WLG_ADVANCED_MAX_CURRICULUM", 1.5
+        )
         curriculum_threshold = 0.7
         num_commands = 3  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 5.0  # time before command are changed[s]
         heading_command = False  # if true: compute ang vel command from heading error
+        # Negative disables terrain-specific height commands. The focused
+        # reverse-climb stage sets this to 0.33 m through an environment variable.
+        reverse_climb_fixed_height = _env_float(
+            "WLG_REVERSE_CLIMB_FIXED_HEIGHT", -1.0
+        )
 
         class ranges:
             lin_vel_x = [

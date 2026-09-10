@@ -292,40 +292,24 @@ class LeggedRobot(BaseTask):
                 self.terrain_levels.float()
             )
         if self.cfg.commands.curriculum:
-            self.extras["episode"]["a_flat_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.flat_idx, 1].float()
+            command_groups = (
+                ("a_flat_max_command_x", self.flat_idx),
+                ("a_smooth_slope_max_command_x", self.smooth_slope_idx),
+                ("a_rough_slope_max_command_x", self.rough_slope_idx),
+                ("a_stair_up_max_command_x", self.stair_up_idx),
+                ("a_stair_down_max_command_x", self.stair_down_idx),
+                ("a_discrete_max_command_x", self.discrete_idx),
+                ("a_custom_curb_drop_max_command_x", self.custom_curb_drop_idx),
+                (
+                    "a_custom_reverse_climb_max_command_x",
+                    self.custom_reverse_climb_idx,
+                ),
             )
-        if self.cfg.terrain.curriculum and self.cfg.commands.curriculum:
-            self.extras["episode"]["a_smooth_slope_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.smooth_slope_idx, 1].float()
-            )
-            self.extras["episode"]["a_rough_slope_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.rough_slope_idx, 1].float()
-            )
-            self.extras["episode"]["a_stair_up_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.stair_up_idx, 1].float()
-            )
-            self.extras["episode"]["a_stair_down_max_command_x"] = torch.mean(
-                self.command_ranges["lin_vel_x"][self.stair_down_idx, 1].float()
-            )
-            if self.discrete_idx.numel() > 0:
-                self.extras["episode"]["a_discrete_max_command_x"] = torch.mean(
-                    self.command_ranges["lin_vel_x"][self.discrete_idx, 1].float()
-                )
-            if self.custom_curb_drop_idx.numel() > 0:
-                self.extras["episode"]["a_custom_curb_drop_max_command_x"] = torch.mean(
-                    self.command_ranges["lin_vel_x"][
-                        self.custom_curb_drop_idx, 1
-                    ].float()
-                )
-            if self.custom_reverse_climb_idx.numel() > 0:
-                self.extras["episode"][
-                    "a_custom_reverse_climb_max_command_x"
-                ] = torch.mean(
-                    self.command_ranges["lin_vel_x"]
-                    [self.custom_reverse_climb_idx, 1]
-                    .float()
-                )
+            for key, group_ids in command_groups:
+                if group_ids.numel() > 0:
+                    self.extras["episode"][key] = torch.mean(
+                        self.command_ranges["lin_vel_x"][group_ids, 1].float()
+                    )
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
@@ -730,6 +714,14 @@ class LeggedRobot(BaseTask):
         ][
             env_ids, 0
         ]
+
+        reverse_height = self.cfg.commands.reverse_climb_fixed_height
+        reverse_ids = getattr(self, "custom_reverse_climb_idx", None)
+        if reverse_height >= 0.0 and reverse_ids is not None and len(reverse_ids) > 0:
+            reverse_mask = torch.any(
+                env_ids.unsqueeze(1) == reverse_ids.unsqueeze(0), dim=1
+            )
+            self.commands[env_ids[reverse_mask], 2] = reverse_height
 
         # # 清空 jump_height
         # self.commands[env_ids, self.jump_cmd_idx] = 0.0
@@ -1578,7 +1570,25 @@ class LeggedRobot(BaseTask):
                 .nonzero(as_tuple=False)
                 .flatten()
             )
-            if self.cfg.terrain.custom_terrain_mode == "bidirectional":
+            if self.cfg.terrain.custom_terrain_mode == "bidirectional_focus":
+                split_column = self.cfg.terrain.num_cols // 2
+                self.flat_idx = empty_terrain_idx
+                self.smooth_slope_idx = empty_terrain_idx
+                self.rough_slope_idx = empty_terrain_idx
+                self.stair_up_idx = empty_terrain_idx
+                self.stair_down_idx = empty_terrain_idx
+                self.discrete_idx = empty_terrain_idx
+                self.custom_curb_drop_idx = (
+                    (self.terrain_types < split_column)
+                    .nonzero(as_tuple=False)
+                    .flatten()
+                )
+                self.custom_reverse_climb_idx = (
+                    (self.terrain_types >= split_column)
+                    .nonzero(as_tuple=False)
+                    .flatten()
+                )
+            elif self.cfg.terrain.custom_terrain_mode == "bidirectional":
                 self.discrete_idx = empty_terrain_idx
                 self.custom_curb_drop_idx = column_18_idx
                 self.custom_reverse_climb_idx = column_19_idx

@@ -24,13 +24,13 @@ except ImportError:
 # --------------------
 cmd_x = 0.0
 ang_vel = 0.0
-cmd_height = 0.2
+cmd_height = float(os.getenv("WLG_PLAY_HEIGHT", "0.20"))
 running = True
 turn_left_pressed = False
 turn_right_pressed = False
 
-LIN_VEL_CMD = 0.5
-YAW_STEP = 1.0
+LIN_VEL_CMD = float(os.getenv("WLG_PLAY_LIN_VEL_CMD", "0.5"))
+YAW_STEP = float(os.getenv("WLG_PLAY_YAW_STEP", "1.0"))
 HEIGHT_STEP = 0.02
 
 # Initial viewer camera. Applied once after the environments are created.
@@ -241,16 +241,22 @@ def play(args):
     print(f"[PLAY] spawn height: z={PLAY_SPAWN_Z:.3f} m above terrain origin")
 
     focus_env_idx = 0
-    custom_ids = getattr(env, "custom_curb_drop_idx", None)
-    if custom_ids is not None and len(custom_ids) != 0:
+    focus_terrain = os.getenv("WLG_PLAY_FOCUS_TERRAIN", "custom_drop").lower()
+    focus_attr = {
+        "custom_drop": "custom_curb_drop_idx",
+        "reverse_climb": "custom_reverse_climb_idx",
+    }.get(focus_terrain)
+    custom_ids = getattr(env, focus_attr, None) if focus_attr is not None else None
+    has_selected_focus = custom_ids is not None and len(custom_ids) != 0
+    if has_selected_focus:
         focus_env_idx = int(custom_ids[0].item())
-        print(f"[PLAY] focusing custom curb/drop env: {focus_env_idx}")
+        print(f"[PLAY] focusing {focus_terrain} env: {focus_env_idx}")
 
     if getattr(env, "viewer", None) is not None:
-        if focus_env_idx == 0:
-            env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
-        else:
+        if has_selected_focus:
             update_follow_camera(env, focus_env_idx)
+        else:
+            env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
 
     apply_manual_commands(env, env_cfg)
     obs, obs_history = env.get_observations()

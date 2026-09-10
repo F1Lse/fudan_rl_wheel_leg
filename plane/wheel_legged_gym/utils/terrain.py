@@ -132,6 +132,11 @@ class Terrain:
         stone_distance = 0.05 if difficulty == 0 else 0.1
         gap_size = 1.0 * difficulty
         pit_depth = 1.0 * difficulty
+        if self.cfg.custom_terrain_mode == "bidirectional_focus":
+            # Use every column for the measured two-level obstacle: the first
+            # half starts high and descends, the second half starts low and climbs.
+            curb_double_drop_terrain(terrain, reverse=choice >= 0.5)
+            return terrain
         if choice < self.proportions[0]:
             terrain_utils.pyramid_sloped_terrain(terrain, slope=0, platform_size=3.0)
         elif choice < self.proportions[1]:
