@@ -148,11 +148,28 @@ class LeggedRobotCfg(BaseConfig):
         # independent preserves the original sampler. flat_highspeed emphasizes
         # separate translation/spin limits. flat_highspeed_combined makes full
         # forward-and-turn commands the majority while retaining both endpoints.
+        # mixed_final applies that high-speed profile only on flat terrain and
+        # uses safer, terrain-specific limits everywhere else.
         command_profile = _env_choice(
             "WLG_COMMAND_PROFILE",
             "independent",
-            {"independent", "flat_highspeed", "flat_highspeed_combined"},
+            {
+                "independent",
+                "flat_highspeed",
+                "flat_highspeed_combined",
+                "mixed_final",
+            },
         )
+        mixed_flat_height_min = _env_float("WLG_MIXED_FLAT_HEIGHT_MIN", 0.16)
+        mixed_flat_height_max = _env_float("WLG_MIXED_FLAT_HEIGHT_MAX", 0.22)
+        mixed_terrain_lin_vel_max = _env_float(
+            "WLG_MIXED_TERRAIN_LIN_VEL_MAX", 2.0
+        )
+        mixed_terrain_yaw_max = _env_float("WLG_MIXED_TERRAIN_YAW_MAX", 2.0)
+        mixed_custom_lin_vel_max = _env_float(
+            "WLG_MIXED_CUSTOM_LIN_VEL_MAX", 2.5
+        )
+        mixed_custom_yaw_max = _env_float("WLG_MIXED_CUSTOM_YAW_MAX", 1.0)
 
         class ranges:
             lin_vel_x = [

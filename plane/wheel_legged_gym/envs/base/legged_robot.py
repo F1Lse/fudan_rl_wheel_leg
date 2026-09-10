@@ -717,13 +717,23 @@ class LeggedRobot(BaseTask):
             self.commands[env_ids[translation], 1] *= 0.20
             self.commands[env_ids[spin], 0] *= 0.10
             self.commands[env_ids[mixed], :2] *= 0.50
-        elif self.cfg.commands.command_profile == "flat_highspeed_combined":
+        elif self.cfg.commands.command_profile in (
+            "flat_highspeed_combined",
+            "mixed_final",
+        ):
             # 55% keeps the independently sampled full vx/yaw pair, explicitly
             # training fast curved motion. The remaining samples preserve pure
             # translation and near-in-place spin performance.
             profile = torch.rand(len(env_ids), device=self.device)
             translation = profile < 0.25
             spin = (0.25 <= profile) & (profile < 0.45)
+            if self.cfg.commands.command_profile == "mixed_final":
+                flat_ids = getattr(self, "flat_idx", env_ids[:0])
+                flat_mask = torch.any(
+                    env_ids.unsqueeze(1) == flat_ids.unsqueeze(0), dim=1
+                )
+                translation &= flat_mask
+                spin &= flat_mask
             self.commands[env_ids[translation], 1] *= 0.20
             self.commands[env_ids[spin], 0] *= 0.10
         self.commands[env_ids, 2] = (
@@ -734,6 +744,60 @@ class LeggedRobot(BaseTask):
         ][
             env_ids, 0
         ]
+
+        if self.cfg.commands.command_profile == "mixed_final":
+            flat_ids = getattr(self, "flat_idx", env_ids[:0])
+            custom_ids = torch.cat(
+                (
+                    getattr(self, "custom_curb_drop_idx", env_ids[:0]),
+                    getattr(self, "custom_reverse_climb_idx", env_ids[:0]),
+                )
+            )
+            flat_mask = torch.any(
+                env_ids.unsqueeze(1) == flat_ids.unsqueeze(0), dim=1
+            )
+            custom_mask = torch.any(
+                env_ids.unsqueeze(1) == custom_ids.unsqueeze(0), dim=1
+            )
+            terrain_mask = ~flat_mask & ~custom_mask
+
+            # Flat terrain keeps the global high-speed vx/yaw ranges but uses
+            # the deployment-oriented low body-height band.
+            flat_count = int(flat_mask.sum().item())
+            if flat_count:
+                flat_height_min = self.cfg.commands.mixed_flat_height_min
+                flat_height_max = self.cfg.commands.mixed_flat_height_max
+                self.commands[env_ids[flat_mask], 2] = (
+                    (flat_height_max - flat_height_min)
+                    * torch.rand(flat_count, device=self.device)
+                    + flat_height_min
+                )
+
+            # Ordinary slopes/stairs use conservative limits so the global
+            # 3 m/s and 5 rad/s flat targets are never imposed on them.
+            terrain_count = int(terrain_mask.sum().item())
+            if terrain_count:
+                terrain_lin_max = self.cfg.commands.mixed_terrain_lin_vel_max
+                terrain_yaw_max = self.cfg.commands.mixed_terrain_yaw_max
+                self.commands[env_ids[terrain_mask], 0] = (
+                    2.0 * torch.rand(terrain_count, device=self.device) - 1.0
+                ) * terrain_lin_max
+                self.commands[env_ids[terrain_mask], 1] = (
+                    2.0 * torch.rand(terrain_count, device=self.device) - 1.0
+                ) * terrain_yaw_max
+
+            # The measured curb/drop courses remain mostly straight but retain
+            # the requested 2.5 m/s traversal target.
+            custom_count = int(custom_mask.sum().item())
+            if custom_count:
+                custom_lin_max = self.cfg.commands.mixed_custom_lin_vel_max
+                custom_yaw_max = self.cfg.commands.mixed_custom_yaw_max
+                self.commands[env_ids[custom_mask], 0] = (
+                    2.0 * torch.rand(custom_count, device=self.device) - 1.0
+                ) * custom_lin_max
+                self.commands[env_ids[custom_mask], 1] = (
+                    2.0 * torch.rand(custom_count, device=self.device) - 1.0
+                ) * custom_yaw_max
 
         reverse_height = self.cfg.commands.reverse_climb_fixed_height
         reverse_ids = getattr(self, "custom_reverse_climb_idx", None)
