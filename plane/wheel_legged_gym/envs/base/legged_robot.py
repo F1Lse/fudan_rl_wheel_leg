@@ -208,18 +208,26 @@ class LeggedRobot(BaseTask):
 
     def check_termination(self):
         """Check if environments need to be reset"""
-        fail_buf = torch.any(
-            torch.norm(
-                self.contact_forces[:, self.termination_contact_indices, :], dim=-1
+        if self.cfg.env.recovery_mode:
+            # A prone robot necessarily has body contact and insufficient base
+            # height. Ending that episode after one second prevents PPO from
+            # ever observing a successful stand-up trajectory.
+            fail_buf = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
             )
-            > 10.0,
-            dim=1,
-        )
-        fail_buf |= self.projected_gravity[:, 2] > -0.1
-        # Reject the stable collapsed-knee solution. A one-second grace period is
-        # still applied below through fail_to_terminal_time_s, so brief height
-        # excursions during balancing do not immediately reset the environment.
-        fail_buf |= self.base_height < (self.commands[:, 2] - 0.06)
+        else:
+            fail_buf = torch.any(
+                torch.norm(
+                    self.contact_forces[:, self.termination_contact_indices, :],
+                    dim=-1,
+                )
+                > 10.0,
+                dim=1,
+            )
+            fail_buf |= self.projected_gravity[:, 2] > -0.1
+            # Reject the stable collapsed-knee solution. A one-second grace
+            # period still permits brief height excursions while balancing.
+            fail_buf |= self.base_height < (self.commands[:, 2] - 0.06)
         self.fail_buf *= fail_buf
         self.fail_buf += fail_buf
         self.time_out_buf = (

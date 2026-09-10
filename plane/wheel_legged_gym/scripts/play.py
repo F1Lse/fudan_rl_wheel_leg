@@ -38,7 +38,9 @@ INITIAL_CAMERA_POSITION = [20.0, -20.0, 10.0]
 INITIAL_CAMERA_LOOK_AT = [20.0, 40.0, 0.0]
 FOLLOW_CAMERA_OFFSET = [-2.5, -3.0, 1.6]
 FOLLOW_CAMERA_LOOK_AHEAD = [0.8, 0.0, 0.2]
-PLAY_SPAWN_Z = float(os.getenv("WLG_PLAY_SPAWN_Z", "0.30"))
+PLAY_SPAWN_Z = float(
+    os.getenv("WLG_PLAY_SPAWN_Z", os.getenv("WLG_SPAWN_Z", "0.12"))
+)
 PLAY_WITH_RANDOMIZATION = os.getenv(
     "WLG_PLAY_WITH_RANDOMIZATION", "1"
 ).strip().lower() in ("1", "true", "yes", "on")

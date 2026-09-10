@@ -94,6 +94,10 @@ class LeggedRobotCfg(BaseConfig):
         episode_length_s = 20  # episode length in seconds
         dof_vel_use_pos_diff = True
         fail_to_terminal_time_s = 1
+        # Recovery training must allow the robot to remain on the ground long
+        # enough to discover a stand-up motion. Normal locomotion keeps the
+        # original contact/orientation/height termination logic.
+        recovery_mode = _env_bool("WLG_RECOVERY_MODE", False)
 
     class terrain:
         # none, plane, heightfield or trimesh

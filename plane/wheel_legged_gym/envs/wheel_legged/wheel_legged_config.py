@@ -31,6 +31,7 @@
 from wheel_legged_gym.envs.base.legged_robot_config import (
     LeggedRobotCfg,
     LeggedRobotCfgPPO,
+    _env_float,
 )
 
 
@@ -45,9 +46,9 @@ class WheelLeggedCfg(LeggedRobotCfg):
         #                         "rf1_Joint": 0.65, 
         #                         "r_wheel_Joint": 0.0, 
         #                         }
-        # The lowest collision geometry is about 0.244 m below the root in the
-        # default pose. Keep a small clearance so resets do not start in contact.
-        pos = [0.0, 0.0, 0.30]  # x,y,z [m]
+        # Start close to the prone/resting pose so recovery is learned without
+        # first dropping from the air. WLG_SPAWN_Z permits experiment overrides.
+        pos = [0.0, 0.0, _env_float("WLG_SPAWN_Z", 0.12)]  # x,y,z [m]
         # Restore the default pose used by the historical Stable policy chain.
         # Keeping this reference pose aligned across training, MuJoCo and STM32
         # avoids making the policy relearn a deployment-side offset.

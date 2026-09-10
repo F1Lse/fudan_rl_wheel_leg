@@ -10,6 +10,7 @@ PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-5}"
 # Each target is an absolute checkpoint number. Every stage therefore adds
 # exactly 2000 PPO iterations, including after an interrupted/resumed run.
 STAGE_KEYS=(
+  recovery
   flat_base
   stairs_base
   stairs_speed
@@ -19,6 +20,7 @@ STAGE_KEYS=(
   mixed_v3
 )
 STAGE_LABELS=(
+  "起身基础：趴姿到轮式站立"
   "上台阶1：平地基础"
   "上台阶2：上下楼梯"
   "上台阶3：楼梯速度强化"
@@ -27,16 +29,18 @@ STAGE_LABELS=(
   "随机地形 v2"
   "随机地形 v3：速度上限 2.8"
 )
-STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000)
+STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000)
 STAGE_RUN_NAMES=(
-  hist_longlegs_s01_flat_base
-  hist_longlegs_s02_stairs_base
-  hist_longlegs_s03_stairs_speed
-  hist_longlegs_s04_stairs_yaw
-  hist_longlegs_s05_mixed_v1
-  hist_longlegs_s06_mixed_v2
-  hist_longlegs_s07_mixed_v3
+  hist_recovery_longlegs_s01_recovery
+  hist_recovery_longlegs_s02_flat_base
+  hist_recovery_longlegs_s03_stairs_base
+  hist_recovery_longlegs_s04_stairs_speed
+  hist_recovery_longlegs_s05_stairs_yaw
+  hist_recovery_longlegs_s06_mixed_v1
+  hist_recovery_longlegs_s07_mixed_v2
+  hist_recovery_longlegs_s08_mixed_v3
 )
+STAGE_COUNT="${#STAGE_KEYS[@]}"
 
 usage() {
   cat <<'EOF'
@@ -135,6 +139,7 @@ apply_common_environment() {
   # Match the historical Stable training dynamics. These are intentionally
   # stronger than the recent reduced-randomization experiments.
   export WLG_HISTORICAL_DOMAIN_RAND=1
+  export WLG_SPAWN_Z=0.12
   export WLG_TERRAIN_CURRICULUM=1
   export WLG_TERRAIN_PROGRESS_FRACTION=0.5
   export WLG_MAX_INIT_TERRAIN_LEVEL=5
@@ -149,6 +154,7 @@ apply_common_environment() {
   export WLG_COLLISION_SCALE=-1.0
   export WLG_DOF_POS_LIMITS_SCALE=-1.0
   export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
+  export WLG_RECOVERY_MODE=0
 }
 
 apply_stage_environment() {
@@ -183,6 +189,27 @@ apply_stage_environment() {
   export WLG_OBS_LIN_VEL_SCALE=2.0
 
   case "${STAGE_KEYS[$stage_index]}" in
+    recovery)
+      export WLG_MESH_TYPE=plane
+      export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
+      export WLG_RECOVERY_MODE=1
+      export WLG_LIN_VEL_X_MIN=0.0
+      export WLG_LIN_VEL_X_MAX=0.0
+      export WLG_ANG_VEL_YAW_MIN=0.0
+      export WLG_ANG_VEL_YAW_MAX=0.0
+      export WLG_HEIGHT_MIN=0.20
+      export WLG_HEIGHT_MAX=0.20
+      # Do not reward lying still merely because zero velocity is tracked.
+      # Recovery is driven by upright orientation and commanded base height.
+      export WLG_TRACKING_LIN_VEL_SCALE=0.0
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
+      export WLG_TRACKING_ANG_VEL_SCALE=0.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      export WLG_COLLISION_SCALE=0.0
+      export WLG_NOMINAL_STATE_SCALE=0.0
+      export WLG_ACTION_RATE_SCALE=-0.01
+      export WLG_ACTION_SMOOTH_SCALE=-0.01
+      ;;
     flat_base)
       export WLG_MESH_TYPE=plane
       export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
@@ -272,14 +299,14 @@ show_status() {
     target="${STAGE_TARGETS[$stage_index]}"
     IFS=$'\t' read -r iter path < <(latest_checkpoint_for_stage "$stage_index")
     if (( iter < 0 )); then
-      printf '  [%d/7] %-42s not started (target %d)\n' \
-        "$((stage_index + 1))" "${STAGE_LABELS[$stage_index]}" "$target"
+      printf '  [%d/%d] %-42s not started (target %d)\n' \
+        "$((stage_index + 1))" "$STAGE_COUNT" "${STAGE_LABELS[$stage_index]}" "$target"
     elif (( iter >= target )); then
-      printf '  [%d/7] %-42s complete: model_%d.pt\n' \
-        "$((stage_index + 1))" "${STAGE_LABELS[$stage_index]}" "$iter"
+      printf '  [%d/%d] %-42s complete: model_%d.pt\n' \
+        "$((stage_index + 1))" "$STAGE_COUNT" "${STAGE_LABELS[$stage_index]}" "$iter"
     else
-      printf '  [%d/7] %-42s current: model_%d.pt -> %d\n' \
-        "$((stage_index + 1))" "${STAGE_LABELS[$stage_index]}" "$iter" "$target"
+      printf '  [%d/%d] %-42s current: model_%d.pt -> %d\n' \
+        "$((stage_index + 1))" "$STAGE_COUNT" "${STAGE_LABELS[$stage_index]}" "$iter" "$target"
     fi
   done
 }
@@ -327,7 +354,7 @@ train_all() {
     remaining="$((target - source_iter))"
     echo
     echo "================================================================"
-    echo "[$((stage_index + 1))/7] ${STAGE_LABELS[$stage_index]}"
+    echo "[$((stage_index + 1))/$STAGE_COUNT] ${STAGE_LABELS[$stage_index]}"
     print_stage_config "$stage_index"
     echo "  start=model_${source_iter}.pt, add ${remaining} iterations"
     echo "  Ctrl+C is safe; rerun this script to resume from the newest saved checkpoint."
@@ -361,7 +388,7 @@ train_all() {
   done
 
   echo
-  echo "All seven stages are complete."
+  echo "All $STAGE_COUNT stages are complete."
   IFS=$'\t' read -r final_stage final_iter final_path < <(latest_checkpoint_overall)
   echo "Final checkpoint: $final_path"
 }
