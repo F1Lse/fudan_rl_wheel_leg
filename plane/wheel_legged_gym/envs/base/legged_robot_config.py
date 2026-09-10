@@ -267,8 +267,10 @@ class LeggedRobotCfg(BaseConfig):
 
     class rewards:
         class scales:
-            tracking_lin_vel = 1.0
-            tracking_lin_vel_enhance = 1.0
+            tracking_lin_vel = _env_float("WLG_TRACKING_LIN_VEL_SCALE", 1.0)
+            tracking_lin_vel_enhance = _env_float(
+                "WLG_TRACKING_LIN_VEL_ENHANCE_SCALE", 1.0
+            )
             tracking_ang_vel = 1.0
             tracking_ang_vel_enhance = 1.0
 
@@ -288,8 +290,8 @@ class LeggedRobotCfg(BaseConfig):
             dof_vel = -5e-5 #-5e-5
             dof_acc = -2.5e-7 #-2.5e-7
             torques = -0.0001 #-0.0001
-            action_rate = -0.01#-0.01
-            action_smooth = -0.01#-0.01
+            action_rate = _env_float("WLG_ACTION_RATE_SCALE", -0.01)
+            action_smooth = _env_float("WLG_ACTION_SMOOTH_SCALE", -0.01)
 
             collision = -1.0
             # The previous policy deliberately drove both knee joints into their
