@@ -10,7 +10,8 @@ PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-5}"
 # Each target is an absolute checkpoint number. Every stage therefore adds
 # exactly 2000 PPO iterations, including after an interrupted/resumed run.
 STAGE_KEYS=(
-  recovery
+  recovery_low
+  recovery_raise
   flat_base
   stairs_base
   stairs_speed
@@ -20,7 +21,8 @@ STAGE_KEYS=(
   mixed_v3
 )
 STAGE_LABELS=(
-  "起身基础：趴姿到轮式站立"
+  "起身第1步：趴姿到低位轮式平衡"
+  "起身第2步：低位平衡后抬升机身"
   "上台阶1：平地基础"
   "上台阶2：上下楼梯"
   "上台阶3：楼梯速度强化"
@@ -29,16 +31,17 @@ STAGE_LABELS=(
   "随机地形 v2"
   "随机地形 v3：速度上限 2.8"
 )
-STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000)
+STAGE_TARGETS=(2000 4000 6000 8000 10000 12000 14000 16000 18000)
 STAGE_RUN_NAMES=(
-  hist_recovery_v3_longlegs_s01_recovery
-  hist_recovery_v3_longlegs_s02_flat_base
-  hist_recovery_v3_longlegs_s03_stairs_base
-  hist_recovery_v3_longlegs_s04_stairs_speed
-  hist_recovery_v3_longlegs_s05_stairs_yaw
-  hist_recovery_v3_longlegs_s06_mixed_v1
-  hist_recovery_v3_longlegs_s07_mixed_v2
-  hist_recovery_v3_longlegs_s08_mixed_v3
+  hist_recovery_v4_longlegs_s01_recovery_low
+  hist_recovery_v4_longlegs_s02_recovery_raise
+  hist_recovery_v4_longlegs_s03_flat_base
+  hist_recovery_v4_longlegs_s04_stairs_base
+  hist_recovery_v4_longlegs_s05_stairs_speed
+  hist_recovery_v4_longlegs_s06_stairs_yaw
+  hist_recovery_v4_longlegs_s07_mixed_v1
+  hist_recovery_v4_longlegs_s08_mixed_v2
+  hist_recovery_v4_longlegs_s09_mixed_v3
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -194,7 +197,7 @@ apply_stage_environment() {
   export WLG_OBS_LIN_VEL_SCALE=2.0
 
   case "${STAGE_KEYS[$stage_index]}" in
-    recovery)
+    recovery_low|recovery_raise)
       export WLG_MESH_TYPE=plane
       export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
       export WLG_RECOVERY_MODE=1
@@ -202,12 +205,9 @@ apply_stage_environment() {
       export WLG_LIN_VEL_X_MAX=0.0
       export WLG_ANG_VEL_YAW_MIN=0.0
       export WLG_ANG_VEL_YAW_MAX=0.0
-      # This joint pose was observed at about 0.28 m and is known to be
-      # mechanically feasible. Lower-height tracking is learned later.
-      export WLG_HEIGHT_MIN=0.28
-      export WLG_HEIGHT_MAX=0.28
       # Do not reward lying still merely because zero velocity is tracked.
-      # Recovery is driven by upright orientation and commanded base height.
+      # Recovery is driven by the staged leg pose, upright orientation and
+      # commanded base height.
       export WLG_TRACKING_LIN_VEL_SCALE=0.0
       export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
       export WLG_TRACKING_ANG_VEL_SCALE=0.0
@@ -216,18 +216,32 @@ apply_stage_environment() {
       # enhanced term saturated at -1. Use an unsaturated L1 error instead.
       export WLG_BASE_HEIGHT_SCALE=-2.0
       export WLG_BASE_HEIGHT_ENHANCE_SCALE=0.0
-      export WLG_COLLISION_SCALE=0.0
+      export WLG_COLLISION_SCALE=-0.2
       export WLG_NOMINAL_STATE_SCALE=0.0
-      export WLG_ORIENTATION_SCALE=-1.0
-      export WLG_ANG_VEL_XY_SCALE=-0.1
+      export WLG_ORIENTATION_SCALE=-2.0
+      export WLG_ANG_VEL_XY_SCALE=-0.2
       export WLG_DOF_POS_LIMITS_SCALE=-0.2
-      export WLG_RECOVERY_POSE_SCALE=-0.5
       export WLG_ACTION_RATE_SCALE=-0.001
       export WLG_ACTION_SMOOTH_SCALE=-0.001
-      # action=(standing_q-default_q)/pos_action_scale
-      export WLG_INITIAL_ACTOR_BIAS=0.86,2.10,0.0,-0.86,-2.10,0.0
       export WLG_INIT_NOISE_STD=0.5
       export WLG_ENTROPY_COEF=0.02
+      if [[ "${STAGE_KEYS[$stage_index]}" == recovery_low ]]; then
+        # User-verified low pose: the chassis is clear and only wheels carry
+        # the robot. Wheel angles are intentionally not pose targets.
+        export WLG_HEIGHT_MIN=0.20
+        export WLG_HEIGHT_MAX=0.20
+        export WLG_RECOVERY_JOINT_TARGET=0.0,0.8,0.0,-0.8
+        export WLG_RECOVERY_POSE_SCALE=-0.5
+        # action=(low_q-default_q)/pos_action_scale
+        export WLG_INITIAL_ACTOR_BIAS=0.46,2.90,0.0,-0.46,-2.90,0.0
+      else
+        # Resume the learned prone-to-low transition, then learn to raise the
+        # body from that balanced state to the verified 0.28 m pose.
+        export WLG_HEIGHT_MIN=0.28
+        export WLG_HEIGHT_MAX=0.28
+        export WLG_RECOVERY_JOINT_TARGET=0.2,0.4,-0.2,-0.4
+        export WLG_RECOVERY_POSE_SCALE=-0.25
+      fi
       ;;
     flat_base)
       export WLG_MESH_TYPE=plane
