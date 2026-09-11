@@ -19,6 +19,13 @@ STAGE_KEYS=(
   terrain_recovery
   terrain_slow
   terrain_expand
+  flat_refresh_mid
+  flat_refresh_full
+  terrain_height_high
+  terrain_height_full
+  terrain_speed_1p2
+  terrain_speed_1p6
+  terrain_speed_2p0
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
@@ -30,8 +37,15 @@ STAGE_LABELS=(
   "低等级混合地形：零速起身与多高度平衡"
   "混合地形：低速移动并保持起身能力"
   "随机地形：课程扩速并加入双向特殊地形"
+  "纯平地复习：恢复中速稳定性"
+  "纯平地复习：恢复 ±2.0 高速稳定性"
+  "混合地形：集中学习 0.26–0.33 m 高机身"
+  "随机地形：覆盖 0.16–0.33 m 全高度"
+  "随机地形：显式扩速到 ±1.2"
+  "随机地形：显式扩速到 ±1.6"
+  "随机地形：楼梯最高 ±2.0 并保留双向特殊地形"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -42,6 +56,13 @@ STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s07_terrain_recovery
   hist_recovery_v4_longlegs_s08_terrain_slow
   hist_recovery_v4_longlegs_s09_terrain_expand
+  hist_recovery_v4_longlegs_s10_flat_refresh_mid
+  hist_recovery_v4_longlegs_s11_flat_refresh_full
+  hist_recovery_v4_longlegs_s12_terrain_height_high
+  hist_recovery_v4_longlegs_s13_terrain_height_full
+  hist_recovery_v4_longlegs_s14_terrain_speed_1p2
+  hist_recovery_v4_longlegs_s15_terrain_speed_1p6
+  hist_recovery_v4_longlegs_s16_terrain_speed_2p0
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -300,7 +321,41 @@ apply_stage_environment() {
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
       fi
       ;;
-    terrain_recovery|terrain_slow|terrain_expand)
+    flat_refresh_mid|flat_refresh_full)
+      # Terrain-only fine-tuning reduced recent exposure to fast flat motion.
+      # Briefly return to the original plane task before mixing terrains again.
+      export WLG_MESH_TYPE=plane
+      export WLG_RECOVERY_MODE=1
+      export WLG_COMMAND_CURRICULUM=0
+      export WLG_HEIGHT_MIN=0.16
+      export WLG_HEIGHT_MAX=0.30
+      export WLG_COMMAND_RESAMPLING_TIME=5.0
+      export WLG_COLLISION_SCALE=-1.0
+      export WLG_WHEEL_SUPPORT_SCALE=2.0
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_ANG_VEL_XY_SCALE=-0.1
+      export WLG_BASE_HEIGHT_SCALE=2.0
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_ACTION_RATE_SCALE=-0.01
+      export WLG_ACTION_SMOOTH_SCALE=-0.01
+      export WLG_TRACKING_LIN_VEL_SCALE=1.5
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+      export WLG_TRACKING_ANG_VEL_SCALE=1.5
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.005
+      if [[ "${STAGE_KEYS[$stage_index]}" == flat_refresh_mid ]]; then
+        export WLG_LIN_VEL_X_MIN=-1.2
+        export WLG_LIN_VEL_X_MAX=1.2
+        export WLG_ANG_VEL_YAW_MIN=-1.5
+        export WLG_ANG_VEL_YAW_MAX=1.5
+      else
+        export WLG_LIN_VEL_X_MIN=-2.0
+        export WLG_LIN_VEL_X_MAX=2.0
+        export WLG_ANG_VEL_YAW_MIN=-3.0
+        export WLG_ANG_VEL_YAW_MAX=3.0
+      fi
+      ;;
+    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0)
       # Follow the historical recovery chain: introduce terrain with a large
       # flat share, preserve recovery resets, and only then expand commands.
       export WLG_MESH_TYPE=trimesh
@@ -352,7 +407,7 @@ apply_stage_environment() {
         export WLG_TRACKING_ANG_VEL_SCALE=1.25
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
         export WLG_WHEEL_SUPPORT_SCALE=0.5
-      else
+      elif [[ "${STAGE_KEYS[$stage_index]}" == terrain_expand ]]; then
         # The final stage starts from the low-speed range and lets successful
         # environments expand independently. Basic terrains may reach ±2 m/s
         # and ±3 rad/s; stairs-up/custom obstacles stay at safer limits.
@@ -373,6 +428,95 @@ apply_stage_environment() {
         export WLG_TRACKING_ANG_VEL_SCALE=1.5
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
         export WLG_WHEEL_SUPPORT_SCALE=0.25
+      elif [[ "${STAGE_KEYS[$stage_index]}" == terrain_height_high || "${STAGE_KEYS[$stage_index]}" == terrain_height_full ]]; then
+        # Raise the body before increasing terrain speed. A large flat share
+        # preserves the strong plane policy while the remaining environments
+        # teach the same height response on slopes, stairs and custom curbs.
+        export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_COMMAND_PROFILE=mixed_final
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_WHEEL_SUPPORT_SCALE=0.25
+        export WLG_ENTROPY_COEF=0.005
+        if [[ "${STAGE_KEYS[$stage_index]}" == terrain_height_high ]]; then
+          # Current generator uses the fourth entry for stair-down. Weight it
+          # above stair-up because the present policy already climbs well.
+          export WLG_TERRAIN_PROPORTIONS=0.6,0.05,0.05,0.15,0.05,0.1
+          export WLG_MAX_INIT_TERRAIN_LEVEL=3
+          export WLG_HEIGHT_MIN=0.26
+          export WLG_HEIGHT_MAX=0.33
+          export WLG_LIN_VEL_X_MIN=-1.2
+          export WLG_LIN_VEL_X_MAX=1.2
+          export WLG_ANG_VEL_YAW_MIN=-1.5
+          export WLG_ANG_VEL_YAW_MAX=1.5
+          export WLG_MIXED_FLAT_HEIGHT_MIN=0.26
+          export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=0.8
+          export WLG_MIXED_TERRAIN_YAW_MAX=1.0
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=0.8
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.0
+        else
+          export WLG_TERRAIN_PROPORTIONS=0.5,0.1,0.05,0.15,0.1,0.1
+          export WLG_MAX_INIT_TERRAIN_LEVEL=4
+          export WLG_HEIGHT_MIN=0.16
+          export WLG_HEIGHT_MAX=0.33
+          export WLG_LIN_VEL_X_MIN=-2.0
+          export WLG_LIN_VEL_X_MAX=2.0
+          export WLG_ANG_VEL_YAW_MIN=-3.0
+          export WLG_ANG_VEL_YAW_MAX=3.0
+          export WLG_MIXED_FLAT_HEIGHT_MIN=0.16
+          export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
+          export WLG_MIXED_TERRAIN_YAW_MAX=1.2
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.0
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.0
+        fi
+      else
+        # The terrain curriculum in stage 9 deliberately started at ±0.8 m/s,
+        # but difficult-level success is too sparse to reach the configured
+        # caps quickly. Continue with explicit speed bands, as in the historical
+        # training chain, so stairs receive enough approach momentum.
+        export WLG_TERRAIN_PROPORTIONS=0.3,0.15,0.1,0.2,0.15,0.1
+        export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_COMMAND_PROFILE=mixed_final
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_WHEEL_SUPPORT_SCALE=0.25
+        export WLG_ENTROPY_COEF=0.005
+        export WLG_HEIGHT_MIN=0.16
+        export WLG_HEIGHT_MAX=0.33
+        export WLG_LIN_VEL_X_MIN=-2.0
+        export WLG_LIN_VEL_X_MAX=2.0
+        export WLG_ANG_VEL_YAW_MIN=-3.0
+        export WLG_ANG_VEL_YAW_MAX=3.0
+        export WLG_MIXED_FLAT_HEIGHT_MIN=0.16
+        export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+
+        if [[ "${STAGE_KEYS[$stage_index]}" == terrain_speed_1p2 ]]; then
+          export WLG_MAX_INIT_TERRAIN_LEVEL=4
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
+          export WLG_MIXED_TERRAIN_YAW_MAX=1.5
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.2
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.0
+        elif [[ "${STAGE_KEYS[$stage_index]}" == terrain_speed_1p6 ]]; then
+          export WLG_MAX_INIT_TERRAIN_LEVEL=5
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.6
+          export WLG_MIXED_TERRAIN_YAW_MAX=2.0
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.5
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.5
+        else
+          export WLG_MAX_INIT_TERRAIN_LEVEL=5
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=2.0
+          export WLG_MIXED_TERRAIN_YAW_MAX=2.0
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.8
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.5
+        fi
       fi
       ;;
     *)
