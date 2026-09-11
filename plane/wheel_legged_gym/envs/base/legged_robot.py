@@ -714,7 +714,10 @@ class LeggedRobot(BaseTask):
         ][
             env_ids, 0
         ]
-        if self.cfg.commands.command_profile == "flat_highspeed":
+        if self.cfg.commands.command_profile in (
+            "flat_highspeed",
+            "mixed_flat_highspeed",
+        ):
             # 60% translation: full vx and 20% yaw.
             # 30% spin: full yaw and 10% vx.
             # 10% mixed: half of both sampled commands.
@@ -722,6 +725,14 @@ class LeggedRobot(BaseTask):
             translation = profile < 0.60
             spin = (0.60 <= profile) & (profile < 0.90)
             mixed = profile >= 0.90
+            if self.cfg.commands.command_profile == "mixed_flat_highspeed":
+                flat_ids = getattr(self, "flat_idx", env_ids[:0])
+                flat_mask = torch.any(
+                    env_ids.unsqueeze(1) == flat_ids.unsqueeze(0), dim=1
+                )
+                translation &= flat_mask
+                spin &= flat_mask
+                mixed &= flat_mask
             self.commands[env_ids[translation], 1] *= 0.20
             self.commands[env_ids[spin], 0] *= 0.10
             self.commands[env_ids[mixed], :2] *= 0.50
@@ -753,7 +764,10 @@ class LeggedRobot(BaseTask):
             env_ids, 0
         ]
 
-        if self.cfg.commands.command_profile == "mixed_final":
+        if self.cfg.commands.command_profile in (
+            "mixed_final",
+            "mixed_flat_highspeed",
+        ):
             flat_ids = getattr(self, "flat_idx", env_ids[:0])
             custom_ids = torch.cat(
                 (

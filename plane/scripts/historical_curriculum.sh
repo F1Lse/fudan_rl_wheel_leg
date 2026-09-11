@@ -26,6 +26,8 @@ STAGE_KEYS=(
   terrain_speed_1p2
   terrain_speed_1p6
   terrain_speed_2p0
+  flat_speed_2p2_final
+  flat_speed_2p5_final
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
@@ -44,8 +46,10 @@ STAGE_LABELS=(
   "随机地形：显式扩速到 ±1.2"
   "随机地形：显式扩速到 ±1.6"
   "随机地形：楼梯最高 ±2.0 并保留双向特殊地形"
+  "最终混合训练：平地直线速度提高到 ±2.2"
+  "最终混合训练：平地直线速度提高到 ±2.5"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -63,6 +67,8 @@ STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s14_terrain_speed_1p2
   hist_recovery_v4_longlegs_s15_terrain_speed_1p6
   hist_recovery_v4_longlegs_s16_terrain_speed_2p0
+  hist_recovery_v4_longlegs_s17_flat_speed_2p2_final
+  hist_recovery_v4_longlegs_s18_flat_speed_2p5_final
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -355,7 +361,7 @@ apply_stage_environment() {
         export WLG_ANG_VEL_YAW_MAX=3.0
       fi
       ;;
-    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0)
+    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0|flat_speed_2p2_final|flat_speed_2p5_final)
       # Follow the historical recovery chain: introduce terrain with a large
       # flat share, preserve recovery resets, and only then expand commands.
       export WLG_MESH_TYPE=trimesh
@@ -510,12 +516,30 @@ apply_stage_environment() {
           export WLG_MIXED_TERRAIN_YAW_MAX=2.0
           export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.5
           export WLG_MIXED_CUSTOM_YAW_MAX=1.5
-        else
+        elif [[ "${STAGE_KEYS[$stage_index]}" == terrain_speed_2p0 ]]; then
           export WLG_MAX_INIT_TERRAIN_LEVEL=5
           export WLG_MIXED_TERRAIN_LIN_VEL_MAX=2.0
           export WLG_MIXED_TERRAIN_YAW_MAX=2.0
           export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.8
           export WLG_MIXED_CUSTOM_YAW_MAX=1.5
+        else
+          # Keep half of the batch on flat tiles for the final speed extension.
+          # Maximum translation and yaw are sampled mostly separately on flat
+          # ground, while terrain limits remain exactly as in stage 16.
+          export WLG_TERRAIN_PROPORTIONS=0.5,0.1,0.05,0.15,0.1,0.1
+          export WLG_MAX_INIT_TERRAIN_LEVEL=5
+          export WLG_COMMAND_PROFILE=mixed_flat_highspeed
+          export WLG_MIXED_TERRAIN_LIN_VEL_MAX=2.0
+          export WLG_MIXED_TERRAIN_YAW_MAX=2.0
+          export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.8
+          export WLG_MIXED_CUSTOM_YAW_MAX=1.5
+          if [[ "${STAGE_KEYS[$stage_index]}" == flat_speed_2p2_final ]]; then
+            export WLG_LIN_VEL_X_MIN=-2.2
+            export WLG_LIN_VEL_X_MAX=2.2
+          else
+            export WLG_LIN_VEL_X_MIN=-2.5
+            export WLG_LIN_VEL_X_MAX=2.5
+          fi
         fi
       fi
       ;;
