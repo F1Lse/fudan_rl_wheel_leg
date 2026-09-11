@@ -21,9 +21,7 @@ def resource_path(relative_path: str) -> str:
     return str(MUJOCO_ROOT / relative_path)
 
 
-DEFAULT_XML_PATH = resource_path(
-    "assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel_long_legs_24kg.xml"
-)
+DEFAULT_XML_PATH = resource_path("assert_now/infantry_binglian_yuntai/infantry_V2/meshes/mjmodel.xml")
 
 JUMP_ONNX_PATH = resource_path("actor/yuntai/p60.50.2把urdf中力矩限制为50.onnx")
 
@@ -944,8 +942,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--torque_scale", type=float, default=1.0)
     parser.add_argument("--torque_map", type=str, default="analytic", choices=["analytic", "numeric"])
     parser.add_argument("--base_body_name", type=str, default="base_Link_del")
-    parser.add_argument("--l1", type=float, default=0.21)
-    parser.add_argument("--l2", type=float, default=0.25)
+    parser.add_argument("--l1", type=float, default=0.175)
+    parser.add_argument("--l2", type=float, default=0.208)
     parser.add_argument("--print_base_ang_vel", action="store_true")
     parser.add_argument("--print_jacobian", action="store_true")
     parser.add_argument("--print_interval", type=int, default=20)

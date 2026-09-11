@@ -14,19 +14,25 @@ STAGE_KEYS=(
   recovery_raise
   height_balance
   slow_motion
+  speed_mid
+  speed_full
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
   "起身第2步：低位平衡后抬升机身"
   "纯平地：零速度多高度平衡"
   "纯平地：多高度低速行驶与转向"
+  "纯平地：速度 ±1.5、转向 ±2.0"
+  "纯平地：速度 ±2.0、转向 ±3.0"
 )
-STAGE_TARGETS=(3000 6000 10000 14000)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
   hist_recovery_v4_longlegs_s03_height_balance
   hist_recovery_v4_longlegs_s04_slow_motion
+  hist_recovery_v4_longlegs_s05_speed_mid
+  hist_recovery_v4_longlegs_s06_speed_full
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -230,7 +236,7 @@ apply_stage_environment() {
         export WLG_RECOVERY_POSE_SCALE=-0.25
       fi
       ;;
-    height_balance|slow_motion)
+    height_balance|slow_motion|speed_mid|speed_full)
       export WLG_RECOVERY_MODE=1
       export WLG_COMMAND_CURRICULUM=0
       export WLG_HEIGHT_MIN=0.16
@@ -254,7 +260,7 @@ apply_stage_environment() {
         export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
         export WLG_TRACKING_ANG_VEL_SCALE=0.0
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
-      else
+      elif [[ "${STAGE_KEYS[$stage_index]}" == slow_motion ]]; then
         export WLG_LIN_VEL_X_MIN=-1.0
         export WLG_LIN_VEL_X_MAX=1.0
         export WLG_ANG_VEL_YAW_MIN=-1.0
@@ -262,6 +268,26 @@ apply_stage_environment() {
         export WLG_TRACKING_LIN_VEL_SCALE=1.0
         export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.0
         export WLG_TRACKING_ANG_VEL_SCALE=1.0
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      elif [[ "${STAGE_KEYS[$stage_index]}" == speed_mid ]]; then
+        export WLG_COMMAND_RESAMPLING_TIME=5.0
+        export WLG_LIN_VEL_X_MIN=-1.5
+        export WLG_LIN_VEL_X_MAX=1.5
+        export WLG_ANG_VEL_YAW_MIN=-2.0
+        export WLG_ANG_VEL_YAW_MAX=2.0
+        export WLG_TRACKING_LIN_VEL_SCALE=1.25
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.25
+        export WLG_TRACKING_ANG_VEL_SCALE=1.25
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      else
+        export WLG_COMMAND_RESAMPLING_TIME=5.0
+        export WLG_LIN_VEL_X_MIN=-2.0
+        export WLG_LIN_VEL_X_MAX=2.0
+        export WLG_ANG_VEL_YAW_MIN=-3.0
+        export WLG_ANG_VEL_YAW_MAX=3.0
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
       fi
       ;;
