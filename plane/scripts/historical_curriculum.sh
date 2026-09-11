@@ -16,6 +16,9 @@ STAGE_KEYS=(
   slow_motion
   speed_mid
   speed_full
+  terrain_recovery
+  terrain_slow
+  terrain_expand
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
@@ -24,8 +27,11 @@ STAGE_LABELS=(
   "纯平地：多高度低速行驶与转向"
   "纯平地：速度 ±1.5、转向 ±2.0"
   "纯平地：速度 ±2.0、转向 ±3.0"
+  "低等级混合地形：零速起身与多高度平衡"
+  "混合地形：低速移动并保持起身能力"
+  "随机地形：课程扩速并加入双向特殊地形"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -33,6 +39,9 @@ STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s04_slow_motion
   hist_recovery_v4_longlegs_s05_speed_mid
   hist_recovery_v4_longlegs_s06_speed_full
+  hist_recovery_v4_longlegs_s07_terrain_recovery
+  hist_recovery_v4_longlegs_s08_terrain_slow
+  hist_recovery_v4_longlegs_s09_terrain_expand
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -291,6 +300,81 @@ apply_stage_environment() {
         export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
       fi
       ;;
+    terrain_recovery|terrain_slow|terrain_expand)
+      # Follow the historical recovery chain: introduce terrain with a large
+      # flat share, preserve recovery resets, and only then expand commands.
+      export WLG_MESH_TYPE=trimesh
+      export WLG_RECOVERY_MODE=1
+      export WLG_TERRAIN_CURRICULUM=1
+      export WLG_TERRAIN_PROGRESS_FRACTION=0.5
+      export WLG_HEIGHT_MIN=0.16
+      export WLG_HEIGHT_MAX=0.30
+      export WLG_COMMAND_RESAMPLING_TIME=5.0
+      export WLG_COLLISION_SCALE=-1.0
+      export WLG_ORIENTATION_SCALE=-15.0
+      export WLG_ANG_VEL_XY_SCALE=-0.1
+      export WLG_BASE_HEIGHT_SCALE=2.0
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_RECOVERY_POSE_SCALE=0.0
+      export WLG_ACTION_RATE_SCALE=-0.01
+      export WLG_ACTION_SMOOTH_SCALE=-0.01
+
+      if [[ "${STAGE_KEYS[$stage_index]}" == terrain_recovery ]]; then
+        # Start on levels 0-1 and spend half of the robots on flat ground. A
+        # tiny tracking scale keeps terrain-curriculum bookkeeping available
+        # without letting the zero-command reward dominate recovery.
+        export WLG_TERRAIN_PROPORTIONS=0.5,0.2,0.1,0.1,0.1,0.0
+        export WLG_MAX_INIT_TERRAIN_LEVEL=1
+        export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_LIN_VEL_X_MIN=0.0
+        export WLG_LIN_VEL_X_MAX=0.0
+        export WLG_ANG_VEL_YAW_MIN=0.0
+        export WLG_ANG_VEL_YAW_MAX=0.0
+        export WLG_TRACKING_LIN_VEL_SCALE=0.000001
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=0.0
+        export WLG_TRACKING_ANG_VEL_SCALE=0.000001
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_WHEEL_SUPPORT_SCALE=1.0
+      elif [[ "${STAGE_KEYS[$stage_index]}" == terrain_slow ]]; then
+        # Once recovery works, add conservative motion while keeping 40% flat
+        # examples so the newly learned stand-up behavior is not forgotten.
+        export WLG_TERRAIN_PROPORTIONS=0.4,0.2,0.1,0.15,0.15,0.0
+        export WLG_MAX_INIT_TERRAIN_LEVEL=3
+        export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_LIN_VEL_X_MIN=-0.8
+        export WLG_LIN_VEL_X_MAX=0.8
+        export WLG_ANG_VEL_YAW_MIN=-1.0
+        export WLG_ANG_VEL_YAW_MAX=1.0
+        export WLG_TRACKING_LIN_VEL_SCALE=1.25
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.25
+        export WLG_TRACKING_ANG_VEL_SCALE=1.25
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_WHEEL_SUPPORT_SCALE=0.5
+      else
+        # The final stage starts from the low-speed range and lets successful
+        # environments expand independently. Basic terrains may reach ±2 m/s
+        # and ±3 rad/s; stairs-up/custom obstacles stay at safer limits.
+        export WLG_TERRAIN_PROPORTIONS=0.3,0.2,0.1,0.15,0.15,0.1
+        export WLG_MAX_INIT_TERRAIN_LEVEL=5
+        export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_COMMAND_CURRICULUM=1
+        export WLG_LIN_VEL_X_MIN=-0.8
+        export WLG_LIN_VEL_X_MAX=0.8
+        export WLG_ANG_VEL_YAW_MIN=-1.0
+        export WLG_ANG_VEL_YAW_MAX=1.0
+        export WLG_BASIC_MAX_CURRICULUM=2.0
+        export WLG_ADVANCED_MAX_CURRICULUM=1.5
+        export WLG_BASIC_MAX_ANG_VEL_CURRICULUM=3.0
+        export WLG_ADVANCED_MAX_ANG_VEL_CURRICULUM=2.0
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_WHEEL_SUPPORT_SCALE=0.25
+      fi
+      ;;
     *)
       echo "Unknown stage index: $stage_index" >&2
       exit 2
@@ -449,7 +533,7 @@ export_latest() {
   fi
   check_python_environment
   run_dir="$(basename "$(dirname "$path")")"
-  output_path="${WLG_EXPORT_OUT:-$PLANE_ROOT/export_onnx/plane_balance_longlegs_model_${iter}.onnx}"
+  output_path="${WLG_EXPORT_OUT:-$PLANE_ROOT/export_onnx/longlegs_historical_curriculum_model_${iter}.onnx}"
   cd "$PLANE_ROOT"
   "$PYTHON_BIN" export_onnx/export_onnx.py \
     --load_run="$run_dir" \
