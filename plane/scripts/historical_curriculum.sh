@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLANE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_ROOT="$PLANE_ROOT/logs/wheel_legged"
 PYTHON_BIN="${PYTHON_BIN:-python}"
-PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-5}"
+PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-20}"
 
 # Each target is an absolute checkpoint number. Interrupted stages therefore
 # resume from the newest checkpoint without repeating completed iterations.
@@ -55,7 +55,7 @@ STAGE_LABELS=(
   "直角地形修复：集中适应楼梯与双向特殊坎"
   "最终能力回放：全高度、平地高速与复杂地形"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600 40000 41500 43000)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600 40000 43000 45000)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -92,7 +92,7 @@ Usage:
 
 Environment overrides:
   PYTHON_BIN=python                 Python in the Isaac Gym environment
-  WLG_PLAY_NUM_ENVS=5               number of robots used by play
+  WLG_PLAY_NUM_ENVS=20              number of robots used by play; use 20 to cover every terrain column
   WLG_EXPORT_OUT=/path/policy.onnx  optional ONNX output path
 EOF
 }
@@ -531,6 +531,7 @@ apply_stage_environment() {
         export WLG_MAX_INIT_TERRAIN_LEVEL=3
         export WLG_TERRAIN_PROGRESS_FRACTION=0.4
         export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_REVERSE_CLIMB_FIXED_HEIGHT=0.33
         export WLG_COMMAND_CURRICULUM=0
         export WLG_COMMAND_PROFILE=mixed_final
         export WLG_HEIGHT_MIN=0.16
@@ -566,6 +567,7 @@ apply_stage_environment() {
         export WLG_TERRAIN_PROPORTIONS=0.5,0.1,0.05,0.15,0.1,0.1
         export WLG_MAX_INIT_TERRAIN_LEVEL=5
         export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_REVERSE_CLIMB_FIXED_HEIGHT=0.33
         export WLG_COMMAND_CURRICULUM=0
         export WLG_COMMAND_PROFILE=mixed_flat_highspeed
         export WLG_HEIGHT_MIN=0.16
