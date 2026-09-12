@@ -28,6 +28,9 @@ STAGE_KEYS=(
   terrain_speed_2p0
   flat_speed_2p2_final
   flat_speed_2p5_final
+  highstand_antijitter
+  vertical_step_adaptation
+  final_consolidation
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
@@ -48,8 +51,11 @@ STAGE_LABELS=(
   "随机地形：楼梯最高 ±2.0 并保留双向特殊地形"
   "最终混合训练：平地直线速度提高到 ±2.2"
   "最终混合训练：平地直线速度提高到 ±2.5"
+  "高位稳定强化：0.28–0.33 m 原地防抖"
+  "直角地形修复：集中适应楼梯与双向特殊坎"
+  "最终能力回放：全高度、平地高速与复杂地形"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600 40000 41500 43000)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -69,6 +75,9 @@ STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s16_terrain_speed_2p0
   hist_recovery_v4_longlegs_s17_flat_speed_2p2_final
   hist_recovery_v4_longlegs_s18_flat_speed_2p5_final
+  hist_recovery_v4_longlegs_s19_highstand_antijitter
+  hist_recovery_v4_longlegs_s20_vertical_step_adaptation
+  hist_recovery_v4_longlegs_s21_final_consolidation
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -173,7 +182,10 @@ apply_common_environment() {
   export WLG_TERRAIN_CURRICULUM=1
   export WLG_TERRAIN_PROGRESS_FRACTION=0.5
   export WLG_MAX_INIT_TERRAIN_LEVEL=5
-  export WLG_SLOPE_THRESHOLD=0.75
+  # A 50 mm rise across one 100 mm height-field cell has slope 0.5. Keep the
+  # threshold below it so trimesh conversion creates a vertical face instead
+  # of joining the two samples with a short ramp.
+  export WLG_SLOPE_THRESHOLD=0.45
   export WLG_COMMAND_PROFILE=independent
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
   export WLG_TRACKING_ANG_VEL_SCALE=1.0
@@ -361,7 +373,37 @@ apply_stage_environment() {
         export WLG_ANG_VEL_YAW_MAX=3.0
       fi
       ;;
-    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0|flat_speed_2p2_final|flat_speed_2p5_final)
+    highstand_antijitter)
+      # Briefly isolate the high standing band. Zero locomotion commands and
+      # stronger temporal penalties teach a quiet equilibrium at 0.28-0.33 m
+      # without changing the deployment PD gains or action interpretation.
+      export WLG_MESH_TYPE=plane
+      export WLG_RECOVERY_MODE=1
+      export WLG_COMMAND_CURRICULUM=0
+      export WLG_COMMAND_PROFILE=independent
+      export WLG_COMMAND_RESAMPLING_TIME=3.0
+      export WLG_HEIGHT_MIN=0.28
+      export WLG_HEIGHT_MAX=0.33
+      export WLG_LIN_VEL_X_MIN=0.0
+      export WLG_LIN_VEL_X_MAX=0.0
+      export WLG_ANG_VEL_YAW_MIN=0.0
+      export WLG_ANG_VEL_YAW_MAX=0.0
+      export WLG_TRACKING_LIN_VEL_SCALE=1.0
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.0
+      export WLG_TRACKING_ANG_VEL_SCALE=1.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+      export WLG_BASE_HEIGHT_SCALE=2.0
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_ORIENTATION_SCALE=-15.0
+      export WLG_ANG_VEL_XY_SCALE=-0.15
+      export WLG_WHEEL_SUPPORT_SCALE=1.0
+      export WLG_ACTION_RATE_SCALE=-0.03
+      export WLG_ACTION_SMOOTH_SCALE=-0.05
+      export WLG_DOF_VEL_SCALE=-0.0001
+      export WLG_DOF_ACC_SCALE=-5e-7
+      export WLG_ENTROPY_COEF=0.002
+      ;;
+    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0|flat_speed_2p2_final|flat_speed_2p5_final|vertical_step_adaptation|final_consolidation)
       # Follow the historical recovery chain: introduce terrain with a large
       # flat share, preserve recovery resets, and only then expand commands.
       export WLG_MESH_TYPE=trimesh
@@ -480,6 +522,78 @@ apply_stage_environment() {
           export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.0
           export WLG_MIXED_CUSTOM_YAW_MAX=1.0
         fi
+      elif [[ "${STAGE_KEYS[$stage_index]}" == vertical_step_adaptation ]]; then
+        # Earlier stages accidentally used slope_threshold=0.75, which turned
+        # every 50 mm rise over a 100 mm cell into a ramp. Oversample stairs and
+        # both directions of the measured curb/drop course at conservative
+        # speeds while the policy adapts to the corrected vertical faces.
+        export WLG_TERRAIN_PROPORTIONS=0.2,0.05,0.05,0.25,0.25,0.2
+        export WLG_MAX_INIT_TERRAIN_LEVEL=3
+        export WLG_TERRAIN_PROGRESS_FRACTION=0.4
+        export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_COMMAND_PROFILE=mixed_final
+        export WLG_HEIGHT_MIN=0.16
+        export WLG_HEIGHT_MAX=0.33
+        export WLG_LIN_VEL_X_MIN=-2.0
+        export WLG_LIN_VEL_X_MAX=2.0
+        export WLG_ANG_VEL_YAW_MIN=-2.0
+        export WLG_ANG_VEL_YAW_MAX=2.0
+        export WLG_MIXED_FLAT_HEIGHT_MIN=0.16
+        export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+        export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
+        export WLG_MIXED_TERRAIN_YAW_MAX=1.0
+        export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.0
+        export WLG_MIXED_CUSTOM_YAW_MAX=0.8
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_BASE_HEIGHT_SCALE=2.0
+        export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+        export WLG_ORIENTATION_SCALE=-15.0
+        export WLG_ANG_VEL_XY_SCALE=-0.1
+        export WLG_WHEEL_SUPPORT_SCALE=0.25
+        export WLG_ACTION_RATE_SCALE=-0.02
+        export WLG_ACTION_SMOOTH_SCALE=-0.03
+        export WLG_DOF_VEL_SCALE=-0.0001
+        export WLG_DOF_ACC_SCALE=-5e-7
+        export WLG_ENTROPY_COEF=0.003
+      elif [[ "${STAGE_KEYS[$stage_index]}" == final_consolidation ]]; then
+        # Rehearse the complete deployable envelope after the high-stand
+        # specialization so flat speed and terrain skills are not forgotten.
+        # Keep the lower entropy and additional smoothing learned in stage 19.
+        export WLG_TERRAIN_PROPORTIONS=0.5,0.1,0.05,0.15,0.1,0.1
+        export WLG_MAX_INIT_TERRAIN_LEVEL=5
+        export WLG_CUSTOM_TERRAIN_MODE=bidirectional
+        export WLG_COMMAND_CURRICULUM=0
+        export WLG_COMMAND_PROFILE=mixed_flat_highspeed
+        export WLG_HEIGHT_MIN=0.16
+        export WLG_HEIGHT_MAX=0.33
+        export WLG_LIN_VEL_X_MIN=-2.5
+        export WLG_LIN_VEL_X_MAX=2.5
+        export WLG_ANG_VEL_YAW_MIN=-3.0
+        export WLG_ANG_VEL_YAW_MAX=3.0
+        export WLG_MIXED_FLAT_HEIGHT_MIN=0.16
+        export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+        export WLG_MIXED_TERRAIN_LIN_VEL_MAX=2.0
+        export WLG_MIXED_TERRAIN_YAW_MAX=2.0
+        export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.8
+        export WLG_MIXED_CUSTOM_YAW_MAX=1.5
+        export WLG_TRACKING_LIN_VEL_SCALE=1.5
+        export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_SCALE=1.5
+        export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
+        export WLG_BASE_HEIGHT_SCALE=2.0
+        export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+        export WLG_ORIENTATION_SCALE=-15.0
+        export WLG_ANG_VEL_XY_SCALE=-0.1
+        export WLG_WHEEL_SUPPORT_SCALE=0.25
+        export WLG_ACTION_RATE_SCALE=-0.02
+        export WLG_ACTION_SMOOTH_SCALE=-0.03
+        export WLG_DOF_VEL_SCALE=-0.0001
+        export WLG_DOF_ACC_SCALE=-5e-7
+        export WLG_ENTROPY_COEF=0.002
       else
         # The terrain curriculum in stage 9 deliberately started at ±0.8 m/s,
         # but difficult-level success is too sparse to reach the configured
