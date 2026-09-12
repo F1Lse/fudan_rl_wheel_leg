@@ -24,7 +24,14 @@
 
 `spin_mixed` 命令采样器在平地分配：10% 静止锚点、25% 低位原地高速旋转、20% 原地旋转变高度、35% 平移旋转、10% 低速高 yaw 移动。原地样本会额外惩罚平面漂移、roll/pitch 角速度、动作高频变化，并直接约束机身坐标系重力向量接近 `[0, 0, -1]`；移动样本不会使用这些额外惩罚。
 
-训练输出中的 `Mean max_tilt_deg` 同时包含 roll 和 pitch，是云台稳定性最重要的指标；`Mean max_abs_pitch_deg` 只包含 pitch。这里记录的是完整回合内峰值的平均值，不是普通平均姿态。
+训练输出中的倾角指标含义如下：
+
+- `Mean mean_stationary_tilt_deg`：`vx=0` 原地旋转期间的平均总倾角，最直观地表示平时有多歪；
+- `Mean rms_stationary_tilt_deg`：原地旋转期间总倾角的 RMS，对持续抖动和较大摆动更敏感；
+- `Mean max_tilt_deg`：完整回合的 roll+pitch 合成倾角峰值；
+- `Mean max_abs_pitch_deg`：完整回合的 pitch 峰值，不包含 roll。
+
+对于云台，优先观察平均值和 RMS，再用峰值排查加减速瞬间的严重晃动。
 
 ## 使用
 

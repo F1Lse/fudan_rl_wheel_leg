@@ -170,10 +170,14 @@ class LeggedRobot(BaseTask):
             torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
         )
         tilt = torch.acos(torch.clamp(-self.projected_gravity[:, 2], -1.0, 1.0))
+        stationary_spin = (torch.abs(self.commands[:, 0]) < 1.0e-6).float()
         self.episode_max_abs_pitch = torch.maximum(
             self.episode_max_abs_pitch, abs_pitch
         )
         self.episode_max_tilt = torch.maximum(self.episode_max_tilt, tilt)
+        self.episode_stationary_tilt_sum += tilt * stationary_spin
+        self.episode_stationary_tilt_sq_sum += torch.square(tilt) * stationary_spin
+        self.episode_stationary_tilt_steps += stationary_spin
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
         theta1 = torch.cat(
@@ -280,6 +284,23 @@ class LeggedRobot(BaseTask):
         episode_max_tilt_deg = (
             torch.mean(self.episode_max_tilt[env_ids]) * 180.0 / math.pi
         )
+        stationary_steps = torch.clamp(
+            torch.sum(self.episode_stationary_tilt_steps[env_ids]), min=1.0
+        )
+        episode_mean_stationary_tilt_deg = (
+            torch.sum(self.episode_stationary_tilt_sum[env_ids])
+            / stationary_steps
+            * 180.0
+            / math.pi
+        )
+        episode_rms_stationary_tilt_deg = (
+            torch.sqrt(
+                torch.sum(self.episode_stationary_tilt_sq_sum[env_ids])
+                / stationary_steps
+            )
+            * 180.0
+            / math.pi
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -307,6 +328,9 @@ class LeggedRobot(BaseTask):
         self.fail_buf[env_ids] = 0
         self.episode_max_abs_pitch[env_ids] = 0.0
         self.episode_max_tilt[env_ids] = 0.0
+        self.episode_stationary_tilt_sum[env_ids] = 0.0
+        self.episode_stationary_tilt_sq_sum[env_ids] = 0.0
+        self.episode_stationary_tilt_steps[env_ids] = 0.0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -322,6 +346,12 @@ class LeggedRobot(BaseTask):
             self.episode_sums[key][env_ids] = 0.0
         self.extras["episode"]["max_abs_pitch_deg"] = episode_max_abs_pitch_deg
         self.extras["episode"]["max_tilt_deg"] = episode_max_tilt_deg
+        self.extras["episode"]["mean_stationary_tilt_deg"] = (
+            episode_mean_stationary_tilt_deg
+        )
+        self.extras["episode"]["rms_stationary_tilt_deg"] = (
+            episode_rms_stationary_tilt_deg
+        )
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
             self.extras["episode"]["terrain_level"] = torch.mean(
@@ -1538,6 +1568,18 @@ class LeggedRobot(BaseTask):
             dtype=torch.float,
             device=self.device,
             requires_grad=False,
+        )
+        self.episode_stationary_tilt_sum = torch.zeros(
+            self.num_envs,
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
+        self.episode_stationary_tilt_sq_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_stationary_tilt_steps = torch.zeros_like(
+            self.episode_stationary_tilt_sum
         )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
