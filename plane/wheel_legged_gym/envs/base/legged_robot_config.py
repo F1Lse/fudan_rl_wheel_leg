@@ -203,6 +203,7 @@ class LeggedRobotCfg(BaseConfig):
                 "flat_highspeed_combined",
                 "mixed_final",
                 "mixed_flat_highspeed",
+                "mixed_highstand_anchor",
             },
         )
         mixed_flat_height_min = _env_float("WLG_MIXED_FLAT_HEIGHT_MIN", 0.16)
@@ -215,6 +216,18 @@ class LeggedRobotCfg(BaseConfig):
             "WLG_MIXED_CUSTOM_LIN_VEL_MAX", 2.5
         )
         mixed_custom_yaw_max = _env_float("WLG_MIXED_CUSTOM_YAW_MAX", 1.0)
+        # In the final mixed policy, reserve part of the flat-ground batch for
+        # exact zero-speed, high-body commands. This makes the deployment's
+        # common high-idle operating point an explicit training distribution.
+        highstand_anchor_fraction = _env_float(
+            "WLG_HIGHSTAND_ANCHOR_FRACTION", 0.0
+        )
+        highstand_anchor_height_min = _env_float(
+            "WLG_HIGHSTAND_ANCHOR_HEIGHT_MIN", 0.30
+        )
+        highstand_anchor_height_max = _env_float(
+            "WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX", 0.33
+        )
 
         class ranges:
             lin_vel_x = [
@@ -353,6 +366,25 @@ class LeggedRobotCfg(BaseConfig):
             torques = _env_float("WLG_TORQUES_SCALE", -0.0001) #-0.0001
             action_rate = _env_float("WLG_ACTION_RATE_SCALE", -0.01)
             action_smooth = _env_float("WLG_ACTION_SMOOTH_SCALE", -0.01)
+
+            # These masked penalties are active only for exact zero-speed,
+            # high-body anchor commands. Defaults are zero so all historical
+            # checkpoints and stages retain their original reward definition.
+            high_stand_lin_vel = _env_float(
+                "WLG_HIGH_STAND_LIN_VEL_SCALE", 0.0
+            )
+            high_stand_ang_vel_xy = _env_float(
+                "WLG_HIGH_STAND_ANG_VEL_XY_SCALE", 0.0
+            )
+            high_stand_orientation = _env_float(
+                "WLG_HIGH_STAND_ORIENTATION_SCALE", 0.0
+            )
+            high_stand_action_rate = _env_float(
+                "WLG_HIGH_STAND_ACTION_RATE_SCALE", 0.0
+            )
+            high_stand_action_smooth = _env_float(
+                "WLG_HIGH_STAND_ACTION_SMOOTH_SCALE", 0.0
+            )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)

@@ -717,6 +717,7 @@ class LeggedRobot(BaseTask):
         if self.cfg.commands.command_profile in (
             "flat_highspeed",
             "mixed_flat_highspeed",
+            "mixed_highstand_anchor",
         ):
             # 60% translation: full vx and 20% yaw.
             # 30% spin: full yaw and 10% vx.
@@ -725,7 +726,10 @@ class LeggedRobot(BaseTask):
             translation = profile < 0.60
             spin = (0.60 <= profile) & (profile < 0.90)
             mixed = profile >= 0.90
-            if self.cfg.commands.command_profile == "mixed_flat_highspeed":
+            if self.cfg.commands.command_profile in (
+                "mixed_flat_highspeed",
+                "mixed_highstand_anchor",
+            ):
                 flat_ids = getattr(self, "flat_idx", env_ids[:0])
                 flat_mask = torch.any(
                     env_ids.unsqueeze(1) == flat_ids.unsqueeze(0), dim=1
@@ -767,6 +771,7 @@ class LeggedRobot(BaseTask):
         if self.cfg.commands.command_profile in (
             "mixed_final",
             "mixed_flat_highspeed",
+            "mixed_highstand_anchor",
         ):
             flat_ids = getattr(self, "flat_idx", env_ids[:0])
             custom_ids = torch.cat(
@@ -820,6 +825,33 @@ class LeggedRobot(BaseTask):
                 self.commands[env_ids[custom_mask], 1] = (
                     2.0 * torch.rand(custom_count, device=self.device) - 1.0
                 ) * custom_yaw_max
+
+            if self.cfg.commands.command_profile == "mixed_highstand_anchor":
+                # Keep a persistent exact-zero/high-height subset inside the
+                # final mixed distribution. Sampling this after the ordinary
+                # flat profile intentionally overrides both vx and yaw.
+                anchor_fraction = min(
+                    max(self.cfg.commands.highstand_anchor_fraction, 0.0), 1.0
+                )
+                anchor_mask = flat_mask & (
+                    torch.rand(len(env_ids), device=self.device) < anchor_fraction
+                )
+                anchor_count = int(anchor_mask.sum().item())
+                if anchor_count:
+                    anchor_ids = env_ids[anchor_mask]
+                    anchor_height_min = (
+                        self.cfg.commands.highstand_anchor_height_min
+                    )
+                    anchor_height_max = (
+                        self.cfg.commands.highstand_anchor_height_max
+                    )
+                    self.commands[anchor_ids, 0] = 0.0
+                    self.commands[anchor_ids, 1] = 0.0
+                    self.commands[anchor_ids, 2] = (
+                        (anchor_height_max - anchor_height_min)
+                        * torch.rand(anchor_count, device=self.device)
+                        + anchor_height_min
+                    )
 
         reverse_height = self.cfg.commands.reverse_climb_fixed_height
         reverse_ids = getattr(self, "custom_reverse_climb_idx", None)
@@ -2023,6 +2055,41 @@ class LeggedRobot(BaseTask):
             ),
             dim=1,
         )
+
+    def _high_stand_idle_mask(self):
+        """Select the explicit high-body, exact-zero command anchors."""
+        return (
+            (self.commands[:, 2] >= self.cfg.commands.highstand_anchor_height_min)
+            & (torch.abs(self.commands[:, 0]) < 1.0e-6)
+            & (torch.abs(self.commands[:, 1]) < 1.0e-6)
+        ).float()
+
+    def _reward_high_stand_lin_vel(self):
+        # L1 keeps useful gradient close to zero and suppresses fore/aft drift.
+        planar_speed = torch.abs(self.base_lin_vel[:, 0]) + torch.abs(
+            self.base_lin_vel[:, 1]
+        )
+        return self._high_stand_idle_mask() * planar_speed
+
+    def _reward_high_stand_ang_vel_xy(self):
+        # Roll and pitch rates directly represent the observed high-stance sway.
+        tilt_rate = torch.abs(self.base_ang_vel[:, 0]) + torch.abs(
+            self.base_ang_vel[:, 1]
+        )
+        return self._high_stand_idle_mask() * tilt_rate
+
+    def _reward_high_stand_orientation(self):
+        # Projected-gravity x/y penalizes both pitch and roll displacement.
+        tilt = torch.abs(self.projected_gravity[:, 0]) + torch.abs(
+            self.projected_gravity[:, 1]
+        )
+        return self._high_stand_idle_mask() * tilt
+
+    def _reward_high_stand_action_rate(self):
+        return self._high_stand_idle_mask() * self._reward_action_rate()
+
+    def _reward_high_stand_action_smooth(self):
+        return self._high_stand_idle_mask() * self._reward_action_smooth()
 
     def _reward_collision(self):
         # Penalize collisions on selected bodies

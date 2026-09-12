@@ -31,6 +31,7 @@ STAGE_KEYS=(
   highstand_antijitter
   vertical_step_adaptation
   final_consolidation
+  highstand_anchor_consolidation
 )
 STAGE_LABELS=(
   "起身第1步：趴姿到低位轮式平衡"
@@ -54,8 +55,9 @@ STAGE_LABELS=(
   "高位稳定强化：0.28–0.33 m 原地防抖"
   "直角地形修复：集中适应楼梯与双向特殊坎"
   "最终能力回放：全高度、平地高速与复杂地形"
+  "最终高位锚定：静止防抖与完整能力持续混训"
 )
-STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600 40000 43000 45000)
+STAGE_TARGETS=(3000 6000 10000 14000 16100 18100 20100 22100 24100 25100 27100 28600 30600 32600 34600 36600 37600 39600 40000 43000 45000 47000)
 STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s01_recovery_low
   hist_recovery_v4_longlegs_s02_recovery_raise
@@ -78,6 +80,7 @@ STAGE_RUN_NAMES=(
   hist_recovery_v4_longlegs_s19_highstand_antijitter
   hist_recovery_v4_longlegs_s20_vertical_step_adaptation
   hist_recovery_v4_longlegs_s21_final_consolidation
+  hist_recovery_v4_longlegs_s22_highstand_anchor_consolidation
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -188,6 +191,9 @@ apply_common_environment() {
   export WLG_SLOPE_THRESHOLD=0.45
   export WLG_COMMAND_PROFILE=independent
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
+  export WLG_HIGHSTAND_ANCHOR_FRACTION=0.0
+  export WLG_HIGHSTAND_ANCHOR_HEIGHT_MIN=0.30
+  export WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX=0.33
   export WLG_TRACKING_ANG_VEL_SCALE=1.0
   export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.0
   export WLG_NOMINAL_STATE_SCALE=-1.0
@@ -201,6 +207,11 @@ apply_common_environment() {
   export WLG_INIT_NOISE_STD=0.5
   export WLG_ENTROPY_COEF=0.01
   export WLG_RECOVERY_POSE_SCALE=0.0
+  export WLG_HIGH_STAND_LIN_VEL_SCALE=0.0
+  export WLG_HIGH_STAND_ANG_VEL_XY_SCALE=0.0
+  export WLG_HIGH_STAND_ORIENTATION_SCALE=0.0
+  export WLG_HIGH_STAND_ACTION_RATE_SCALE=0.0
+  export WLG_HIGH_STAND_ACTION_SMOOTH_SCALE=0.0
   export WLG_RECOVERY_JOINT_TARGET=0.2,0.4,-0.2,-0.4
   export WLG_INITIAL_ACTOR_BIAS=""
 }
@@ -403,7 +414,7 @@ apply_stage_environment() {
       export WLG_DOF_ACC_SCALE=-5e-7
       export WLG_ENTROPY_COEF=0.002
       ;;
-    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0|flat_speed_2p2_final|flat_speed_2p5_final|vertical_step_adaptation|final_consolidation)
+    terrain_recovery|terrain_slow|terrain_expand|terrain_height_high|terrain_height_full|terrain_speed_1p2|terrain_speed_1p6|terrain_speed_2p0|flat_speed_2p2_final|flat_speed_2p5_final|vertical_step_adaptation|final_consolidation|highstand_anchor_consolidation)
       # Follow the historical recovery chain: introduce terrain with a large
       # flat share, preserve recovery resets, and only then expand commands.
       export WLG_MESH_TYPE=trimesh
@@ -560,7 +571,7 @@ apply_stage_environment() {
         export WLG_DOF_VEL_SCALE=-0.0001
         export WLG_DOF_ACC_SCALE=-5e-7
         export WLG_ENTROPY_COEF=0.003
-      elif [[ "${STAGE_KEYS[$stage_index]}" == final_consolidation ]]; then
+      elif [[ "${STAGE_KEYS[$stage_index]}" == final_consolidation || "${STAGE_KEYS[$stage_index]}" == highstand_anchor_consolidation ]]; then
         # Rehearse the complete deployable envelope after the high-stand
         # specialization so flat speed and terrain skills are not forgotten.
         # Keep the lower entropy and additional smoothing learned in stage 19.
@@ -596,6 +607,20 @@ apply_stage_environment() {
         export WLG_DOF_VEL_SCALE=-0.0001
         export WLG_DOF_ACC_SCALE=-5e-7
         export WLG_ENTROPY_COEF=0.002
+        if [[ "${STAGE_KEYS[$stage_index]}" == highstand_anchor_consolidation ]]; then
+          # Half of the batch is flat; anchoring half of those environments
+          # makes roughly 25% of all samples exact-zero at 0.30-0.33 m while
+          # the other 75% continuously rehearse locomotion and terrain skills.
+          export WLG_COMMAND_PROFILE=mixed_highstand_anchor
+          export WLG_HIGHSTAND_ANCHOR_FRACTION=0.5
+          export WLG_HIGHSTAND_ANCHOR_HEIGHT_MIN=0.30
+          export WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX=0.33
+          export WLG_HIGH_STAND_LIN_VEL_SCALE=-1.0
+          export WLG_HIGH_STAND_ANG_VEL_XY_SCALE=-0.5
+          export WLG_HIGH_STAND_ORIENTATION_SCALE=-5.0
+          export WLG_HIGH_STAND_ACTION_RATE_SCALE=-0.02
+          export WLG_HIGH_STAND_ACTION_SMOOTH_SCALE=-0.02
+        fi
       else
         # The terrain curriculum in stage 9 deliberately started at ±0.8 m/s,
         # but difficult-level success is too sparse to reach the configured
@@ -675,6 +700,12 @@ print_stage_config() {
     "$WLG_HEIGHT_MIN" "$WLG_HEIGHT_MAX"
   printf '  command_curriculum=%s, target_checkpoint=%s\n' \
     "$WLG_COMMAND_CURRICULUM" "${STAGE_TARGETS[$stage_index]}"
+  if [[ "$WLG_COMMAND_PROFILE" == mixed_highstand_anchor ]]; then
+    printf '  highstand_anchor=%s of flat envs, height=[%s,%s]\n' \
+      "$WLG_HIGHSTAND_ANCHOR_FRACTION" \
+      "$WLG_HIGHSTAND_ANCHOR_HEIGHT_MIN" \
+      "$WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX"
+  fi
 }
 
 show_status() {
