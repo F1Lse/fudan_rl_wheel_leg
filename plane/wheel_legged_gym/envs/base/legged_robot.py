@@ -169,9 +169,11 @@ class LeggedRobot(BaseTask):
         abs_pitch = torch.asin(
             torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
         )
+        tilt = torch.acos(torch.clamp(-self.projected_gravity[:, 2], -1.0, 1.0))
         self.episode_max_abs_pitch = torch.maximum(
             self.episode_max_abs_pitch, abs_pitch
         )
+        self.episode_max_tilt = torch.maximum(self.episode_max_tilt, tilt)
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
         theta1 = torch.cat(
@@ -275,6 +277,9 @@ class LeggedRobot(BaseTask):
         episode_max_abs_pitch_deg = (
             torch.mean(self.episode_max_abs_pitch[env_ids]) * 180.0 / math.pi
         )
+        episode_max_tilt_deg = (
+            torch.mean(self.episode_max_tilt[env_ids]) * 180.0 / math.pi
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -301,6 +306,7 @@ class LeggedRobot(BaseTask):
         self.reset_buf[env_ids] = 1
         self.fail_buf[env_ids] = 0
         self.episode_max_abs_pitch[env_ids] = 0.0
+        self.episode_max_tilt[env_ids] = 0.0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -315,6 +321,7 @@ class LeggedRobot(BaseTask):
             )
             self.episode_sums[key][env_ids] = 0.0
         self.extras["episode"]["max_abs_pitch_deg"] = episode_max_abs_pitch_deg
+        self.extras["episode"]["max_tilt_deg"] = episode_max_tilt_deg
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
             self.extras["episode"]["terrain_level"] = torch.mean(
@@ -1526,6 +1533,12 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         )
+        self.episode_max_tilt = torch.zeros(
+            self.num_envs,
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -2315,10 +2328,15 @@ class LeggedRobot(BaseTask):
         return self._spin_stationary_mask() * tilt_rate
 
     def _reward_spin_stationary_orientation(self):
-        tilt = torch.abs(self.projected_gravity[:, 0]) + torch.abs(
-            self.projected_gravity[:, 1]
+        # Directly target the upright body-frame gravity vector [0, 0, -1].
+        # Including z avoids treating a fully inverted body as "level" merely
+        # because its projected x/y components are both zero.
+        gravity_error = (
+            torch.abs(self.projected_gravity[:, 0])
+            + torch.abs(self.projected_gravity[:, 1])
+            + torch.abs(self.projected_gravity[:, 2] + 1.0)
         )
-        return self._spin_stationary_mask() * tilt
+        return self._spin_stationary_mask() * gravity_error
 
     def _reward_spin_stationary_action_rate(self):
         return self._spin_stationary_mask() * self._reward_action_rate()

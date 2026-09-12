@@ -29,7 +29,7 @@ STAGE_LABELS=(
   "最终综合巩固：保留 ±13 与地形移动转向"
 )
 # Absolute checkpoint numbers continuing from the stable model_56500.pt.
-STAGE_TARGETS=(58500 60500 62500 64500 67500 70500 72500)
+STAGE_TARGETS=(59500 61500 63500 65500 68500 71500 73500)
 STAGE_RUN_NAMES=(
   spin56500_longlegs_s01_low_yaw_7
   spin56500_longlegs_s02_low_yaw_10
@@ -47,7 +47,7 @@ Usage:
   bash scripts/spin_curriculum.sh train
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 62500
+  bash scripts/spin_curriculum.sh play 63500
   bash scripts/spin_curriculum.sh export
 
 The first stage resumes from the stable flat/terrain model_56500.pt. If that
@@ -255,11 +255,11 @@ apply_common_environment() {
 
   # Extra stability is applied only when vx command is exactly zero. Moving
   # turns use the normal, weaker penalties and may lean as needed.
-  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.5
-  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.20
-  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
-  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.01
-  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.01
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-3.0
+  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.80
+  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-12.0
+  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.02
+  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.03
 }
 
 apply_stage_environment() {
