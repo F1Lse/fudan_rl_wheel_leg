@@ -378,6 +378,10 @@ class LeggedRobotCfg(BaseConfig):
             base_height_enhance = _env_float(
                 "WLG_BASE_HEIGHT_ENHANCE_SCALE", 1.0
             )
+            # Optional unsaturated companion to the two Gaussian height terms.
+            # It remains useful when the policy is several centimetres away
+            # from the command and can be enabled only in focused curricula.
+            base_height_l1 = _env_float("WLG_BASE_HEIGHT_L1_SCALE", 0.0)
             nominal_state = _env_float("WLG_NOMINAL_STATE_SCALE", -1.0)
             lin_vel_z = _env_float("WLG_LIN_VEL_Z_SCALE", -1.0)
             ang_vel_xy = _env_float("WLG_ANG_VEL_XY_SCALE", -0.20) #-0.05

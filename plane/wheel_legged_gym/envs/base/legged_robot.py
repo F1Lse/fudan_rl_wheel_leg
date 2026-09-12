@@ -2150,6 +2150,10 @@ class LeggedRobot(BaseTask):
         base_height_error = torch.square(self.base_height - self.commands[:, 2])
         return torch.exp(-base_height_error / 0.001 / 10) - 1
 
+    def _reward_base_height_l1(self):
+        # Unsaturated height gradient for focused all-height stabilization.
+        return torch.abs(self.base_height - self.commands[:, 2])
+
     def _reward_torques(self):
         # Penalize torques
         return torch.sum(torch.square(self.torques), dim=1)
