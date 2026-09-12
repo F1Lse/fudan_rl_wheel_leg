@@ -93,7 +93,13 @@ class LeggedRobotCfg(BaseConfig):
         send_timeouts = True  # send time out information to the algorithm
         episode_length_s = 20  # episode length in seconds
         dof_vel_use_pos_diff = True
-        fail_to_terminal_time_s = 1
+        fail_to_terminal_time_s = _env_float("WLG_FAIL_TO_TERMINAL_TIME_S", 1.0)
+        # Negative disables the terrain-specific pitch guard. Focused descent
+        # curricula can terminate an episode after pitch remains above this
+        # angle for fail_to_terminal_time_s, without changing normal training.
+        terrain_pitch_termination_deg = _env_float(
+            "WLG_TERRAIN_PITCH_TERMINATION_DEG", -1.0
+        )
         # Recovery training must allow the robot to remain on the ground long
         # enough to discover a stand-up motion. Normal locomotion keeps the
         # original contact/orientation/height termination logic.
@@ -194,6 +200,10 @@ class LeggedRobotCfg(BaseConfig):
         reverse_climb_fixed_height = _env_float(
             "WLG_REVERSE_CLIMB_FIXED_HEIGHT", -1.0
         )
+        # Negative disables the override. The focused descent curriculum uses
+        # this to give the standard pyramid climb a deliberate body height while
+        # the measured double-drop course continues to sample a height range.
+        stair_up_fixed_height = _env_float("WLG_STAIR_UP_FIXED_HEIGHT", -1.0)
         # independent preserves the original sampler. flat_highspeed emphasizes
         # separate translation/spin limits. flat_highspeed_combined makes full
         # forward-and-turn commands the majority while retaining both endpoints.
@@ -438,6 +448,17 @@ class LeggedRobotCfg(BaseConfig):
                 "WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE", 0.0
             )
 
+            # Masked to the standard pyramid climb and measured curb/drop
+            # descent. The excess term is zero inside the soft pitch limit and
+            # gives a strong, non-saturating gradient outside it. Defaults are
+            # zero so existing checkpoints keep their historical objective.
+            terrain_pitch_excess = _env_float(
+                "WLG_TERRAIN_PITCH_EXCESS_SCALE", 0.0
+            )
+            terrain_pitch_rate = _env_float(
+                "WLG_TERRAIN_PITCH_RATE_SCALE", 0.0
+            )
+
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
             recovery_pose = _env_float("WLG_RECOVERY_POSE_SCALE", 0.0)
@@ -456,6 +477,9 @@ class LeggedRobotCfg(BaseConfig):
         base_height_target = 0.18
         recovery_joint_target = _env_float_list(
             "WLG_RECOVERY_JOINT_TARGET", [0.2, 0.4, -0.2, -0.4]
+        )
+        terrain_pitch_soft_limit_deg = _env_float(
+            "WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG", 20.0
         )
         max_contact_force = 100.0  # forces above this value are penalized
 

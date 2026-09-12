@@ -165,6 +165,12 @@ class LeggedRobot(BaseTask):
         self.projected_gravity[:] = quat_rotate_inverse(
             self.base_quat, self.gravity_vec
         )
+        abs_pitch = torch.asin(
+            torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
+        )
+        self.episode_max_abs_pitch = torch.maximum(
+            self.episode_max_abs_pitch, abs_pitch
+        )
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
         theta1 = torch.cat(
@@ -228,6 +234,15 @@ class LeggedRobot(BaseTask):
             # Reject the stable collapsed-knee solution. A one-second grace
             # period still permits brief height excursions while balancing.
             fail_buf |= self.base_height < (self.commands[:, 2] - 0.06)
+        pitch_limit_deg = self.cfg.env.terrain_pitch_termination_deg
+        if pitch_limit_deg > 0.0:
+            pitch_limit = math.radians(pitch_limit_deg)
+            abs_pitch = torch.asin(
+                torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
+            )
+            fail_buf |= self._terrain_pitch_focus_mask().bool() & (
+                abs_pitch > pitch_limit
+            )
         self.fail_buf *= fail_buf
         self.fail_buf += fail_buf
         self.time_out_buf = (
@@ -256,6 +271,9 @@ class LeggedRobot(BaseTask):
         """
         if len(env_ids) == 0:
             return
+        episode_max_abs_pitch_deg = (
+            torch.mean(self.episode_max_abs_pitch[env_ids]) * 180.0 / math.pi
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -281,6 +299,7 @@ class LeggedRobot(BaseTask):
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.fail_buf[env_ids] = 0
+        self.episode_max_abs_pitch[env_ids] = 0.0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -294,6 +313,7 @@ class LeggedRobot(BaseTask):
                 torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             )
             self.episode_sums[key][env_ids] = 0.0
+        self.extras["episode"]["max_abs_pitch_deg"] = episode_max_abs_pitch_deg
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
             self.extras["episode"]["terrain_level"] = torch.mean(
@@ -995,6 +1015,14 @@ class LeggedRobot(BaseTask):
             )
             self.commands[env_ids[reverse_mask], 2] = reverse_height
 
+        stair_up_height = self.cfg.commands.stair_up_fixed_height
+        stair_up_ids = getattr(self, "stair_up_idx", None)
+        if stair_up_height >= 0.0 and stair_up_ids is not None and len(stair_up_ids) > 0:
+            stair_up_mask = torch.any(
+                env_ids.unsqueeze(1) == stair_up_ids.unsqueeze(0), dim=1
+            )
+            self.commands[env_ids[stair_up_mask], 2] = stair_up_height
+
         # # 清空 jump_height
         # self.commands[env_ids, self.jump_cmd_idx] = 0.0
 
@@ -1491,6 +1519,12 @@ class LeggedRobot(BaseTask):
             (self.num_envs, self.num_bodies, 3), device=self.device, requires_grad=False
         )
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.episode_max_abs_pitch = torch.zeros(
+            self.num_envs,
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -1960,7 +1994,10 @@ class LeggedRobot(BaseTask):
             elif choice < threshold(2):
                 terrain_name = "rough_slope"
             elif choice < threshold(4):
-                terrain_name = "stair_down" if choice < threshold(3) else "stair_up"
+                # Negative pyramid step height places the spawn platform at the
+                # bottom, so travelling away from the centre climbs upward.
+                # Positive height starts on top and therefore travels down.
+                terrain_name = "stair_up" if choice < threshold(3) else "stair_down"
             elif choice < threshold(5):
                 split = threshold(4) + 0.5 * (threshold(5) - threshold(4))
                 if self.cfg.terrain.custom_terrain_mode == "bidirectional":
@@ -2138,6 +2175,35 @@ class LeggedRobot(BaseTask):
     def _reward_orientation(self):
         # Penalize non flat base orientation
         return torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+
+    def _terrain_pitch_focus_mask(self):
+        """Select the two terrains used by the focused descent curriculum."""
+        cached_mask = getattr(self, "_cached_terrain_pitch_focus_mask", None)
+        if cached_mask is not None:
+            return cached_mask
+        mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        stair_up_ids = getattr(self, "stair_up_idx", None)
+        custom_ids = getattr(self, "custom_curb_drop_idx", None)
+        if stair_up_ids is not None and len(stair_up_ids) > 0:
+            mask[stair_up_ids] = True
+        if custom_ids is not None and len(custom_ids) > 0:
+            mask[custom_ids] = True
+        self._cached_terrain_pitch_focus_mask = mask.float()
+        return self._cached_terrain_pitch_focus_mask
+
+    def _reward_terrain_pitch_excess(self):
+        abs_pitch = torch.asin(
+            torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
+        )
+        soft_limit = math.radians(self.cfg.rewards.terrain_pitch_soft_limit_deg)
+        return self._terrain_pitch_focus_mask() * torch.square(
+            torch.clamp(abs_pitch - soft_limit, min=0.0)
+        )
+
+    def _reward_terrain_pitch_rate(self):
+        return self._terrain_pitch_focus_mask() * torch.square(
+            self.base_ang_vel[:, 1]
+        )
 
     def _reward_base_height(self):
         # Penalize base height away from target

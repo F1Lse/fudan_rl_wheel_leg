@@ -263,6 +263,7 @@ def play(args):
     focus_attr = {
         "custom_drop": "custom_curb_drop_idx",
         "reverse_climb": "custom_reverse_climb_idx",
+        "pyramid_climb": "stair_up_idx",
     }.get(focus_terrain)
     custom_ids = getattr(env, focus_attr, None) if focus_attr is not None else None
     has_selected_focus = custom_ids is not None and len(custom_ids) != 0
