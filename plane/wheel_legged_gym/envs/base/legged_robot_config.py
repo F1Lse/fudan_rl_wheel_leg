@@ -151,10 +151,17 @@ class LeggedRobotCfg(BaseConfig):
         # bidirectional: columns 18/19 become the descending and reverse-climb
         # versions of that measured course, respectively. bidirectional_focus
         # dedicates all columns equally to those two courses for fine-tuning.
+        # descent_focus turns the entire final terrain category into the
+        # forward curb/double-drop course while retaining earlier categories.
         custom_terrain_mode = _env_choice(
             "WLG_CUSTOM_TERRAIN_MODE",
             "descent_discrete",
-            {"descent_discrete", "bidirectional", "bidirectional_focus"},
+            {
+                "descent_discrete",
+                "descent_focus",
+                "bidirectional",
+                "bidirectional_focus",
+            },
         )
         # trimesh only:
         # A 50 mm rise over one 100 mm horizontal cell has slope 0.5. Keep the

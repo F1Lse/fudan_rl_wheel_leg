@@ -10,17 +10,27 @@ PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-5}"
 BASE_CHECKPOINT="${WLG_FLAT_STABILITY_BASE_CHECKPOINT:-47000}"
 BASE_RUN_NAME="${WLG_FLAT_STABILITY_BASE_RUN_NAME:-hist_recovery_v4_longlegs_s22_highstand_anchor_consolidation}"
 
-STAGE_KEYS=(idle_all_height low_motion full_speed)
+STAGE_KEYS=(
+  idle_all_height
+  low_motion
+  terrain_stability_low
+  terrain_stability_mid
+  final_mixed_consolidation
+)
 STAGE_LABELS=(
   "全高度静止稳定与高度跟踪"
   "全高度静止锚点加低速恢复"
-  "平地完整速度恢复并保留静止锚点"
+  "稳定混合地形：低速上下楼梯与弱项复习"
+  "稳定混合地形：恢复中速上下楼梯"
+  "最终混合巩固：全高度静止、平地与上下楼梯"
 )
-STAGE_TARGETS=(48500 50500 52500)
+STAGE_TARGETS=(48000 49000 51500 54000 56500)
 STAGE_RUN_NAMES=(
   flat_stability_longlegs_s01_idle_all_height
   flat_stability_longlegs_s02_low_motion
-  flat_stability_longlegs_s03_full_speed
+  flat_stability_longlegs_s03_terrain_stability_low
+  flat_stability_longlegs_s04_terrain_stability_mid
+  flat_stability_longlegs_s05_final_mixed_consolidation
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -30,7 +40,7 @@ Usage:
   bash scripts/flat_stability_curriculum.sh train
   bash scripts/flat_stability_curriculum.sh status
   bash scripts/flat_stability_curriculum.sh play
-  bash scripts/flat_stability_curriculum.sh play 48500
+  bash scripts/flat_stability_curriculum.sh play 48000
   bash scripts/flat_stability_curriculum.sh export
 
 The first stage resumes from model_47000.pt. Override its location when needed:
@@ -169,6 +179,10 @@ apply_common_environment() {
   export WLG_MESH_TYPE=plane
   export WLG_TERRAIN_PROPORTIONS=0.2,0.2,0.2,0.1,0.2,0.1
   export WLG_TERRAIN_CURRICULUM=0
+  export WLG_TERRAIN_PROGRESS_FRACTION=0.5
+  export WLG_MAX_INIT_TERRAIN_LEVEL=5
+  export WLG_SLOPE_THRESHOLD=0.45
+  export WLG_CUSTOM_TERRAIN_MODE=descent_discrete
   export WLG_COMMAND_CURRICULUM=0
   export WLG_COMMAND_PROFILE=mixed_highstand_anchor
   export WLG_COMMAND_RESAMPLING_TIME=4.0
@@ -177,6 +191,10 @@ apply_common_environment() {
   export WLG_HEIGHT_MAX=0.33
   export WLG_MIXED_FLAT_HEIGHT_MIN=0.16
   export WLG_MIXED_FLAT_HEIGHT_MAX=0.33
+  export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
+  export WLG_MIXED_TERRAIN_YAW_MAX=1.5
+  export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.2
+  export WLG_MIXED_CUSTOM_YAW_MAX=1.0
   export WLG_HIGHSTAND_ANCHOR_HEIGHT_MIN=0.16
   export WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX=0.33
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
@@ -248,13 +266,20 @@ apply_stage_environment() {
       export WLG_WHEEL_SUPPORT_SCALE=0.5
       export WLG_ENTROPY_COEF=0.003
       ;;
-    full_speed)
+    terrain_stability_low|terrain_stability_mid|final_mixed_consolidation)
+      # Starting directly at model_49000, keep exact-zero/full-height anchors
+      # on flat while rehearsing both stair directions, pyramid slopes and the
+      # weak forward curb/double-drop descent in every following stage.
+      export WLG_MESH_TYPE=trimesh
+      export WLG_TERRAIN_PROPORTIONS=0.40,0.15,0.10,0.10,0.10,0.15
+      export WLG_TERRAIN_CURRICULUM=1
+      export WLG_CUSTOM_TERRAIN_MODE=descent_focus
       export WLG_COMMAND_RESAMPLING_TIME=5.0
       export WLG_LIN_VEL_X_MIN=-2.5
       export WLG_LIN_VEL_X_MAX=2.5
       export WLG_ANG_VEL_YAW_MIN=-3.0
       export WLG_ANG_VEL_YAW_MAX=3.0
-      export WLG_HIGHSTAND_ANCHOR_FRACTION=0.40
+      export WLG_HIGHSTAND_ANCHOR_FRACTION=0.60
       export WLG_TRACKING_LIN_VEL_SCALE=1.5
       export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
       export WLG_TRACKING_ANG_VEL_SCALE=1.5
@@ -262,7 +287,7 @@ apply_stage_environment() {
       export WLG_BASE_HEIGHT_ENHANCE_SCALE=2.0
       export WLG_BASE_HEIGHT_L1_SCALE=-0.75
       export WLG_ANG_VEL_XY_SCALE=-0.10
-      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_ORIENTATION_SCALE=-12.0
       export WLG_ACTION_RATE_SCALE=-0.02
       export WLG_ACTION_SMOOTH_SCALE=-0.03
       export WLG_HIGH_STAND_LIN_VEL_SCALE=-1.5
@@ -271,7 +296,29 @@ apply_stage_environment() {
       export WLG_HIGH_STAND_ACTION_RATE_SCALE=-0.015
       export WLG_HIGH_STAND_ACTION_SMOOTH_SCALE=-0.02
       export WLG_WHEEL_SUPPORT_SCALE=0.25
-      export WLG_ENTROPY_COEF=0.002
+      export WLG_MAX_INIT_TERRAIN_LEVEL=3
+      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
+      export WLG_MIXED_TERRAIN_YAW_MAX=1.0
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.0
+      export WLG_MIXED_CUSTOM_YAW_MAX=1.0
+      export WLG_ENTROPY_COEF=0.003
+      if [[ "${STAGE_KEYS[$stage_index]}" == terrain_stability_mid ]]; then
+        export WLG_HIGHSTAND_ANCHOR_FRACTION=0.45
+        export WLG_MAX_INIT_TERRAIN_LEVEL=4
+        export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.5
+        export WLG_MIXED_TERRAIN_YAW_MAX=1.5
+        export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.4
+        export WLG_MIXED_CUSTOM_YAW_MAX=1.0
+      elif [[ "${STAGE_KEYS[$stage_index]}" == final_mixed_consolidation ]]; then
+        export WLG_TERRAIN_PROPORTIONS=0.50,0.10,0.10,0.10,0.10,0.10
+        export WLG_HIGHSTAND_ANCHOR_FRACTION=0.30
+        export WLG_MAX_INIT_TERRAIN_LEVEL=5
+        export WLG_MIXED_TERRAIN_LIN_VEL_MAX=2.0
+        export WLG_MIXED_TERRAIN_YAW_MAX=2.0
+        export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.8
+        export WLG_MIXED_CUSTOM_YAW_MAX=1.2
+        export WLG_ENTROPY_COEF=0.002
+      fi
       ;;
     *)
       echo "Unknown flat-stability stage: ${STAGE_KEYS[$stage_index]}" >&2
@@ -282,6 +329,8 @@ apply_stage_environment() {
 
 print_stage_config() {
   local stage_index="$1"
+  printf '  terrain=%s, proportions=%s, custom=%s\n' \
+    "$WLG_MESH_TYPE" "$WLG_TERRAIN_PROPORTIONS" "$WLG_CUSTOM_TERRAIN_MODE"
   printf '  vx=[%s,%s], yaw=[%s,%s], height=[%s,%s]\n' \
     "$WLG_LIN_VEL_X_MIN" "$WLG_LIN_VEL_X_MAX" \
     "$WLG_ANG_VEL_YAW_MIN" "$WLG_ANG_VEL_YAW_MAX" \

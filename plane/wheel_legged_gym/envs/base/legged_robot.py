@@ -1969,6 +1969,8 @@ class LeggedRobot(BaseTask):
                         if choice < split
                         else "custom_reverse_climb"
                     )
+                elif self.cfg.terrain.custom_terrain_mode == "descent_focus":
+                    terrain_name = "custom_curb_drop"
                 else:
                     terrain_name = "discrete" if choice < split else "custom_curb_drop"
             else:

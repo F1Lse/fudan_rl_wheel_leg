@@ -180,6 +180,8 @@ class Terrain:
             )
             if self.cfg.custom_terrain_mode == "bidirectional":
                 curb_double_drop_terrain(terrain, reverse=choice >= custom_split)
+            elif self.cfg.custom_terrain_mode == "descent_focus":
+                curb_double_drop_terrain(terrain, reverse=False)
             elif choice < custom_split:
                 num_rectangles = 20
                 rectangle_min_size = 1.0
