@@ -768,6 +768,140 @@ class LeggedRobot(BaseTask):
             env_ids, 0
         ]
 
+        if self.cfg.commands.command_profile == "spin_mixed":
+            # A single deployable SPIN policy needs several deliberately
+            # different operating points. Independent sampling underrepresents
+            # exact in-place spins and frequently combines every limit at once.
+            flat_ids = getattr(self, "flat_idx", env_ids[:0])
+            flat_lookup = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            flat_lookup[flat_ids] = True
+            flat_mask = flat_lookup[env_ids]
+            flat_count = int(flat_mask.sum().item())
+            if flat_count:
+                selected_ids = env_ids[flat_mask]
+                profile = torch.rand(flat_count, device=self.device)
+                idle = profile < 0.10
+                in_place_high = (0.10 <= profile) & (profile < 0.35)
+                height_spin = (0.35 <= profile) & (profile < 0.55)
+                moving_spin = (0.55 <= profile) & (profile < 0.90)
+                high_yaw_move = profile >= 0.90
+
+                # 10% exact idle anchors retain quiet low-speed behavior.
+                self.commands[selected_ids[idle], 0:2] = 0.0
+
+                # 25% exact in-place, low-body spins emphasize both directions
+                # near the current stage's yaw ceiling.
+                high_count = int(in_place_high.sum().item())
+                if high_count:
+                    high_ids = selected_ids[in_place_high]
+                    yaw_limit = max(
+                        abs(self.cfg.commands.ranges.ang_vel_yaw[0]),
+                        abs(self.cfg.commands.ranges.ang_vel_yaw[1]),
+                    )
+                    yaw_floor = min(self.cfg.commands.spin_high_yaw_min, yaw_limit)
+                    yaw_magnitude = yaw_floor + (yaw_limit - yaw_floor) * torch.rand(
+                        high_count, device=self.device
+                    )
+                    yaw_sign = torch.where(
+                        torch.rand(high_count, device=self.device) < 0.5,
+                        -torch.ones(high_count, device=self.device),
+                        torch.ones(high_count, device=self.device),
+                    )
+                    self.commands[high_ids, 0] = 0.0
+                    self.commands[high_ids, 1] = yaw_sign * yaw_magnitude
+                    low_min = self.cfg.commands.spin_low_height_min
+                    low_max = self.cfg.commands.spin_low_height_max
+                    self.commands[high_ids, 2] = (
+                        (low_max - low_min)
+                        * torch.rand(high_count, device=self.device)
+                        + low_min
+                    )
+
+                # 20% keeps vx exactly zero while height and yaw are resampled
+                # together. Repeated resampling teaches height changes in spin.
+                self.commands[selected_ids[height_spin], 0] = 0.0
+
+                # 35% ordinary moving turns cover both signs of vx and yaw.
+                moving_count = int(moving_spin.sum().item())
+                if moving_count:
+                    moving_ids = selected_ids[moving_spin]
+                    moving_lin_max = self.cfg.commands.spin_moving_lin_vel_max
+                    moving_yaw_max = self.cfg.commands.spin_moving_yaw_max
+                    self.commands[moving_ids, 0] = (
+                        2.0 * torch.rand(moving_count, device=self.device) - 1.0
+                    ) * moving_lin_max
+                    self.commands[moving_ids, 1] = (
+                        2.0 * torch.rand(moving_count, device=self.device) - 1.0
+                    ) * moving_yaw_max
+                    moving_height_max = min(
+                        self.cfg.commands.spin_moving_height_max,
+                        self.cfg.commands.ranges.height[1],
+                    )
+                    moving_height_min = self.cfg.commands.ranges.height[0]
+                    self.commands[moving_ids, 2] = (
+                        (moving_height_max - moving_height_min)
+                        * torch.rand(moving_count, device=self.device)
+                        + moving_height_min
+                    )
+
+                # 10% explicitly combines near-maximum yaw with a bounded
+                # translation command; this is the high-speed curved mode.
+                high_move_count = int(high_yaw_move.sum().item())
+                if high_move_count:
+                    high_move_ids = selected_ids[high_yaw_move]
+                    yaw_limit = max(
+                        abs(self.cfg.commands.ranges.ang_vel_yaw[0]),
+                        abs(self.cfg.commands.ranges.ang_vel_yaw[1]),
+                    )
+                    yaw_floor = min(self.cfg.commands.spin_high_yaw_min, yaw_limit)
+                    yaw_magnitude = yaw_floor + (yaw_limit - yaw_floor) * torch.rand(
+                        high_move_count, device=self.device
+                    )
+                    yaw_sign = torch.where(
+                        torch.rand(high_move_count, device=self.device) < 0.5,
+                        -torch.ones(high_move_count, device=self.device),
+                        torch.ones(high_move_count, device=self.device),
+                    )
+                    lin_max = self.cfg.commands.spin_high_yaw_lin_vel_max
+                    self.commands[high_move_ids, 0] = (
+                        2.0 * torch.rand(high_move_count, device=self.device) - 1.0
+                    ) * lin_max
+                    self.commands[high_move_ids, 1] = yaw_sign * yaw_magnitude
+                    low_min = self.cfg.commands.spin_low_height_min
+                    low_max = self.cfg.commands.spin_low_height_max
+                    self.commands[high_move_ids, 2] = (
+                        (low_max - low_min)
+                        * torch.rand(high_move_count, device=self.device)
+                        + low_min
+                    )
+
+            # Slopes and rough ground keep simultaneous translation and yaw,
+            # but use their own limits instead of the flat-ground ±13 target.
+            terrain_mask = ~flat_mask
+            terrain_count = int(terrain_mask.sum().item())
+            if terrain_count:
+                terrain_ids = env_ids[terrain_mask]
+                terrain_lin_max = self.cfg.commands.mixed_terrain_lin_vel_max
+                terrain_yaw_max = self.cfg.commands.mixed_terrain_yaw_max
+                self.commands[terrain_ids, 0] = (
+                    2.0 * torch.rand(terrain_count, device=self.device) - 1.0
+                ) * terrain_lin_max
+                self.commands[terrain_ids, 1] = (
+                    2.0 * torch.rand(terrain_count, device=self.device) - 1.0
+                ) * terrain_yaw_max
+                terrain_height_min = self.cfg.commands.ranges.height[0]
+                terrain_height_max = min(
+                    self.cfg.commands.spin_terrain_height_max,
+                    self.cfg.commands.ranges.height[1],
+                )
+                self.commands[terrain_ids, 2] = (
+                    (terrain_height_max - terrain_height_min)
+                    * torch.rand(terrain_count, device=self.device)
+                    + terrain_height_min
+                )
+
         if self.cfg.commands.command_profile in (
             "mixed_final",
             "mixed_flat_highspeed",
@@ -2090,6 +2224,34 @@ class LeggedRobot(BaseTask):
 
     def _reward_high_stand_action_smooth(self):
         return self._high_stand_idle_mask() * self._reward_action_smooth()
+
+    def _spin_stationary_mask(self):
+        """Select SPIN samples that request no forward translation."""
+        return (torch.abs(self.commands[:, 0]) < 1.0e-6).float()
+
+    def _reward_spin_stationary_lin_vel(self):
+        planar_speed = torch.abs(self.base_lin_vel[:, 0]) + torch.abs(
+            self.base_lin_vel[:, 1]
+        )
+        return self._spin_stationary_mask() * planar_speed
+
+    def _reward_spin_stationary_ang_vel_xy(self):
+        tilt_rate = torch.abs(self.base_ang_vel[:, 0]) + torch.abs(
+            self.base_ang_vel[:, 1]
+        )
+        return self._spin_stationary_mask() * tilt_rate
+
+    def _reward_spin_stationary_orientation(self):
+        tilt = torch.abs(self.projected_gravity[:, 0]) + torch.abs(
+            self.projected_gravity[:, 1]
+        )
+        return self._spin_stationary_mask() * tilt
+
+    def _reward_spin_stationary_action_rate(self):
+        return self._spin_stationary_mask() * self._reward_action_rate()
+
+    def _reward_spin_stationary_action_smooth(self):
+        return self._spin_stationary_mask() * self._reward_action_smooth()
 
     def _reward_collision(self):
         # Penalize collisions on selected bodies

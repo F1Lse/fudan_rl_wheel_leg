@@ -194,6 +194,9 @@ class LeggedRobotCfg(BaseConfig):
         # and uses safer terrain-specific limits elsewhere. The separated
         # variant keeps maximum flat translation and yaw mostly in different
         # samples, which is safer when extending the final speed ceiling.
+        # spin_mixed keeps a dedicated low-body/high-yaw anchor while also
+        # sampling height-changing spins and combined translation/yaw. On
+        # trimesh it applies separate, lower command limits away from flat.
         command_profile = _env_choice(
             "WLG_COMMAND_PROFILE",
             "independent",
@@ -204,6 +207,7 @@ class LeggedRobotCfg(BaseConfig):
                 "mixed_final",
                 "mixed_flat_highspeed",
                 "mixed_highstand_anchor",
+                "spin_mixed",
             },
         )
         mixed_flat_height_min = _env_float("WLG_MIXED_FLAT_HEIGHT_MIN", 0.16)
@@ -227,6 +231,24 @@ class LeggedRobotCfg(BaseConfig):
         )
         highstand_anchor_height_max = _env_float(
             "WLG_HIGHSTAND_ANCHOR_HEIGHT_MAX", 0.33
+        )
+        # Dedicated SPIN-policy sampler. The global ranges remain the absolute
+        # envelope; these values shape physically useful combinations inside it.
+        spin_low_height_min = _env_float("WLG_SPIN_LOW_HEIGHT_MIN", 0.16)
+        spin_low_height_max = _env_float("WLG_SPIN_LOW_HEIGHT_MAX", 0.20)
+        spin_high_yaw_min = _env_float("WLG_SPIN_HIGH_YAW_MIN", 7.0)
+        spin_high_yaw_lin_vel_max = _env_float(
+            "WLG_SPIN_HIGH_YAW_LIN_VEL_MAX", 0.5
+        )
+        spin_moving_lin_vel_max = _env_float(
+            "WLG_SPIN_MOVING_LIN_VEL_MAX", 1.5
+        )
+        spin_moving_yaw_max = _env_float("WLG_SPIN_MOVING_YAW_MAX", 8.0)
+        spin_moving_height_max = _env_float(
+            "WLG_SPIN_MOVING_HEIGHT_MAX", 0.28
+        )
+        spin_terrain_height_max = _env_float(
+            "WLG_SPIN_TERRAIN_HEIGHT_MAX", 0.26
         )
 
         class ranges:
@@ -384,6 +406,25 @@ class LeggedRobotCfg(BaseConfig):
             )
             high_stand_action_smooth = _env_float(
                 "WLG_HIGH_STAND_ACTION_SMOOTH_SCALE", 0.0
+            )
+
+            # Extra stability terms used only when the SPIN policy receives an
+            # exact zero forward-speed command. Moving turns retain the normal,
+            # weaker orientation/rate penalties and may lean dynamically.
+            spin_stationary_lin_vel = _env_float(
+                "WLG_SPIN_STATIONARY_LIN_VEL_SCALE", 0.0
+            )
+            spin_stationary_ang_vel_xy = _env_float(
+                "WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE", 0.0
+            )
+            spin_stationary_orientation = _env_float(
+                "WLG_SPIN_STATIONARY_ORIENTATION_SCALE", 0.0
+            )
+            spin_stationary_action_rate = _env_float(
+                "WLG_SPIN_STATIONARY_ACTION_RATE_SCALE", 0.0
+            )
+            spin_stationary_action_smooth = _env_float(
+                "WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE", 0.0
             )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
