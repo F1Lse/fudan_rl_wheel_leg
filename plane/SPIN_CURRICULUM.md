@@ -74,6 +74,14 @@ WLG_PLAY_NUM_ENVS=1 WLG_PLAY_YAW_STEP=13.0 \
   bash scripts/spin_curriculum.sh play 63500
 ```
 
+如果目录名包含空格，或者脚本无法按 run 名自动发现 checkpoint，可以直接传入完整 PT 路径；路径必须用引号包住：
+
+```bash
+WLG_PLAY_NUM_ENVS=1 WLG_PLAY_HEIGHT=0.16 WLG_PLAY_YAW_STEP=7.0 \
+  bash scripts/spin_curriculum.sh play \
+  'logs/wheel_legged/Sep13_03-41- 45_spin56500_longlegs_s01_low_yaw_7/model_59500.pt'
+```
+
 Play 中按住 `A/D` 旋转，`W/S` 平移，`X/C` 改变高度，`E` 停止。先从 yaw 3、7、10 逐步验证，再测试 13；不要一开始就在实车使用最大命令。
 
 导出最新 SPIN ONNX：

@@ -48,6 +48,7 @@ Usage:
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
   bash scripts/spin_curriculum.sh play 63500
+  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_59500.pt'
   bash scripts/spin_curriculum.sh export
 
 The first stage resumes from the stable flat/terrain model_56500.pt. If that
@@ -71,6 +72,31 @@ checkpoint_iter_from_path() {
   file_name="$(basename "$1")"
   file_name="${file_name#model_}"
   printf '%s\n' "${file_name%.pt}"
+}
+
+stage_index_for_checkpoint() {
+  local checkpoint_iter="$1" stage_index
+  [[ "$checkpoint_iter" =~ ^[0-9]+$ ]] || {
+    echo "Checkpoint must be an integer, got: $checkpoint_iter" >&2
+    return 2
+  }
+  for stage_index in "${!STAGE_TARGETS[@]}"; do
+    if (( checkpoint_iter <= STAGE_TARGETS[stage_index] )); then
+      printf '%s\n' "$stage_index"
+      return 0
+    fi
+  done
+  printf '%s\n' "$((STAGE_COUNT - 1))"
+}
+
+resolve_checkpoint_path() {
+  local path="$1"
+  [[ "$path" == /* ]] || path="$PLANE_ROOT/$path"
+  [[ -f "$path" ]] || {
+    echo "Checkpoint not found: $path" >&2
+    return 1
+  }
+  printf '%s\n' "$path"
 }
 
 find_base_checkpoint() {
@@ -443,10 +469,14 @@ train_all() {
 }
 
 play_checkpoint() {
-  local requested_iter="${1:-}"
+  local requested="${1:-${WLG_SPIN_PLAY_PT:-}}"
   local stage_index iter path run_dir
-  if [[ -n "$requested_iter" ]]; then
-    IFS=$'\t' read -r stage_index iter path < <(find_exact_checkpoint "$requested_iter")
+  if [[ "$requested" == *.pt ]]; then
+    path="$(resolve_checkpoint_path "$requested")"
+    iter="$(checkpoint_iter_from_path "$path")"
+    stage_index="$(stage_index_for_checkpoint "$iter")"
+  elif [[ -n "$requested" ]]; then
+    IFS=$'\t' read -r stage_index iter path < <(find_exact_checkpoint "$requested")
   else
     IFS=$'\t' read -r stage_index iter path < <(latest_checkpoint_overall)
   fi
