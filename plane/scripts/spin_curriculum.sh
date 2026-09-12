@@ -7,8 +7,8 @@ LOG_ROOT="$PLANE_ROOT/logs/wheel_legged"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-20}"
 
-BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-47000}"
-BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-hist_recovery_v4_longlegs_s22_highstand_anchor_consolidation}"
+BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-56500}"
+BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-flat_stability_longlegs_s05_final_mixed_consolidation}"
 
 STAGE_KEYS=(
   low_yaw_7
@@ -28,16 +28,16 @@ STAGE_LABELS=(
   "轻度地形旋转：平地、缓坡与起伏"
   "最终综合巩固：保留 ±13 与地形移动转向"
 )
-# Absolute checkpoint numbers continuing from model_47000.pt.
-STAGE_TARGETS=(49000 51000 53000 55000 58000 61000 63000)
+# Absolute checkpoint numbers continuing from the stable model_56500.pt.
+STAGE_TARGETS=(58500 60500 62500 64500 67500 70500 72500)
 STAGE_RUN_NAMES=(
-  spin_longlegs_s01_low_yaw_7
-  spin_longlegs_s02_low_yaw_10
-  spin_longlegs_s03_low_yaw_13
-  spin_longlegs_s04_spin_height
-  spin_longlegs_s05_flat_combined
-  spin_longlegs_s06_mild_terrain
-  spin_longlegs_s07_final_consolidation
+  spin56500_longlegs_s01_low_yaw_7
+  spin56500_longlegs_s02_low_yaw_10
+  spin56500_longlegs_s03_low_yaw_13
+  spin56500_longlegs_s04_spin_height
+  spin56500_longlegs_s05_flat_combined
+  spin56500_longlegs_s06_mild_terrain
+  spin56500_longlegs_s07_final_consolidation
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -47,13 +47,13 @@ Usage:
   bash scripts/spin_curriculum.sh train
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 53000
+  bash scripts/spin_curriculum.sh play 62500
   bash scripts/spin_curriculum.sh export
 
-The first stage resumes from historical-curriculum model_47000.pt. If that
+The first stage resumes from the stable flat/terrain model_56500.pt. If that
 checkpoint has a different path, provide it explicitly:
 
-  WLG_SPIN_BASE_PT=/absolute/path/model_47000.pt \
+  WLG_SPIN_BASE_PT=/absolute/path/model_56500.pt \
     bash scripts/spin_curriculum.sh train
 
 Useful overrides:
@@ -198,7 +198,12 @@ apply_common_environment() {
   export WLG_COMMAND_PROFILE=independent
   export WLG_COMMAND_RESAMPLING_TIME=3.0
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
+  export WLG_STAIR_UP_FIXED_HEIGHT=-1
   export WLG_HIGHSTAND_ANCHOR_FRACTION=0.0
+  export WLG_FAIL_TO_TERMINAL_TIME_S=1.0
+  export WLG_TERRAIN_PITCH_TERMINATION_DEG=-1
+  export WLG_TERRAIN_PITCH_EXCESS_SCALE=0.0
+  export WLG_TERRAIN_PITCH_RATE_SCALE=0.0
 
   export WLG_LIN_VEL_X_MIN=0.0
   export WLG_LIN_VEL_X_MAX=0.0
@@ -225,8 +230,10 @@ apply_common_environment() {
   export WLG_DOF_ACC_SCALE=-5e-7
   export WLG_ACTION_RATE_SCALE=-0.03
   export WLG_ACTION_SMOOTH_SCALE=-0.04
-  export WLG_INIT_NOISE_STD=0.5
-  export WLG_ENTROPY_COEF=0.005
+  # The resumed 56500 policy is already stable. Keep exploration moderate so
+  # the first high-yaw stages do not immediately erase that quiet equilibrium.
+  export WLG_INIT_NOISE_STD=0.30
+  export WLG_ENTROPY_COEF=0.002
   export WLG_RECOVERY_POSE_SCALE=0.0
 
   export WLG_HIGH_STAND_LIN_VEL_SCALE=0.0
@@ -268,11 +275,13 @@ apply_stage_environment() {
       export WLG_ANG_VEL_YAW_MIN=-10.0
       export WLG_ANG_VEL_YAW_MAX=10.0
       export WLG_SPIN_MOVING_YAW_MAX=10.0
+      export WLG_ENTROPY_COEF=0.0025
       ;;
     low_yaw_13)
       export WLG_ANG_VEL_YAW_MIN=-13.0
       export WLG_ANG_VEL_YAW_MAX=13.0
       export WLG_SPIN_MOVING_YAW_MAX=13.0
+      export WLG_ENTROPY_COEF=0.003
       ;;
     spin_height)
       export WLG_COMMAND_PROFILE=spin_mixed
@@ -280,6 +289,7 @@ apply_stage_environment() {
       export WLG_ANG_VEL_YAW_MAX=13.0
       export WLG_HEIGHT_MAX=0.33
       export WLG_SPIN_MOVING_YAW_MAX=10.0
+      export WLG_ENTROPY_COEF=0.003
       ;;
     flat_combined)
       export WLG_COMMAND_PROFILE=spin_mixed
@@ -291,7 +301,7 @@ apply_stage_environment() {
       export WLG_SPIN_HIGH_YAW_LIN_VEL_MAX=0.5
       export WLG_SPIN_MOVING_LIN_VEL_MAX=1.5
       export WLG_SPIN_MOVING_YAW_MAX=8.0
-      export WLG_ENTROPY_COEF=0.004
+      export WLG_ENTROPY_COEF=0.003
       ;;
     mild_terrain|final_consolidation)
       export WLG_MESH_TYPE=trimesh
@@ -308,13 +318,13 @@ apply_stage_environment() {
       export WLG_MIXED_TERRAIN_YAW_MAX=4.0
       export WLG_SPIN_TERRAIN_HEIGHT_MAX=0.26
       export WLG_MAX_INIT_TERRAIN_LEVEL=4
-      export WLG_ENTROPY_COEF=0.004
+      export WLG_ENTROPY_COEF=0.0025
       if [[ "${STAGE_KEYS[$stage_index]}" == final_consolidation ]]; then
         export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
         export WLG_MIXED_TERRAIN_YAW_MAX=6.0
         export WLG_SPIN_TERRAIN_HEIGHT_MAX=0.28
         export WLG_MAX_INIT_TERRAIN_LEVEL=5
-        export WLG_ENTROPY_COEF=0.002
+        export WLG_ENTROPY_COEF=0.0015
       fi
       ;;
     *)

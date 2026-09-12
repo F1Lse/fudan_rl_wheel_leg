@@ -1,6 +1,6 @@
 # 长腿车型 SPIN 综合策略训练
 
-这是一条独立于正常行驶模型的续训链。它从历史课程的 `model_47000.pt` 开始，在同一个 SPIN 策略中逐步加入以下能力：
+这是一条独立于正常行驶和下台阶专用模型的续训链。它从已经稳定的通用 `model_56500.pt` 开始，在同一个 SPIN 策略中逐步加入以下能力：
 
 - 0.16 m 低姿态原地高速旋转，yaw 依次扩展到 ±7、±10、±13 rad/s；
 - 原地旋转过程中切换 0.16–0.33 m 高度命令；
@@ -12,13 +12,15 @@
 
 ## 阶段
 
-1. `47000–49000`：平地、固定 0.16 m、`vx=0`、yaw ±7。
-2. `49000–51000`：平地、固定 0.16 m、`vx=0`、yaw ±10。
-3. `51000–53000`：平地、固定 0.16 m、`vx=0`、yaw ±13。
-4. `53000–55000`：平地、0.16–0.33 m、yaw ±13；保留低位高速旋转并反复重采样高度。
-5. `55000–58000`：平地综合采样原地高速旋转、旋转变高度、普通移动转向和低速高 yaw 移动。
-6. `58000–61000`：55% 平地、25% 平缓坡、20% 轻度起伏；地形命令限制为 `vx ±1.0 m/s、yaw ±4 rad/s`。
-7. `61000–63000`：最终巩固；平地仍保留 yaw ±13，地形扩展到 `vx ±1.2 m/s、yaw ±6 rad/s`。
+1. `56500–58500`：平地、固定 0.16 m、`vx=0`、yaw ±7。
+2. `58500–60500`：平地、固定 0.16 m、`vx=0`、yaw ±10。
+3. `60500–62500`：平地、固定 0.16 m、`vx=0`、yaw ±13。
+4. `62500–64500`：平地、0.16–0.33 m、yaw ±13；保留低位高速旋转并反复重采样高度。
+5. `64500–67500`：平地综合采样原地高速旋转、旋转变高度、普通移动转向和低速高 yaw 移动。
+6. `67500–70500`：55% 平地、25% 平缓坡、20% 轻度起伏；地形命令限制为 `vx ±1.0 m/s、yaw ±4 rad/s`。
+7. `70500–72500`：最终巩固；平地仍保留 yaw ±13，地形扩展到 `vx ±1.2 m/s、yaw ±6 rad/s`。
+
+由于 `model_56500.pt` 已经具备较好的静止稳定性，本课程将早期探索强度降到 `entropy_coef=0.002`，随后只在扩展高速 yaw 时小幅增加，最终再降到 `0.0015`。这样做是为了学习旋转能力，同时减少重新出现原地前后/roll 抖动的风险。
 
 `spin_mixed` 命令采样器在平地分配：10% 静止锚点、25% 低位原地高速旋转、20% 原地旋转变高度、35% 平移旋转、10% 低速高 yaw 移动。原地样本会额外惩罚平面漂移、roll/pitch 角速度、机身倾斜和动作高频变化；移动样本不会使用这些额外惩罚。
 
@@ -35,13 +37,13 @@ bash scripts/spin_curriculum.sh train
 脚本会自动寻找以下路径形式的起始模型：
 
 ```text
-logs/wheel_legged/*_hist_recovery_v4_longlegs_s22_highstand_anchor_consolidation/model_47000.pt
+logs/wheel_legged/*_flat_stability_longlegs_s05_final_mixed_consolidation/model_56500.pt
 ```
 
 如果目录名不同，直接指定 PT：
 
 ```bash
-WLG_SPIN_BASE_PT=logs/wheel_legged/你的目录/model_47000.pt \
+WLG_SPIN_BASE_PT=logs/wheel_legged/你的目录/model_56500.pt \
   bash scripts/spin_curriculum.sh train
 ```
 
@@ -60,7 +62,7 @@ WLG_PLAY_YAW_STEP=7.0 \
 
 ```bash
 WLG_PLAY_NUM_ENVS=1 WLG_PLAY_YAW_STEP=13.0 \
-  bash scripts/spin_curriculum.sh play 53000
+  bash scripts/spin_curriculum.sh play 62500
 ```
 
 Play 中按住 `A/D` 旋转，`W/S` 平移，`X/C` 改变高度，`E` 停止。先从 yaw 3、7、10 逐步验证，再测试 13；不要一开始就在实车使用最大命令。
