@@ -45,6 +45,159 @@ from wheel_legged_gym.rsl_rl.modules import (
 from wheel_legged_gym.rsl_rl.env import VecEnv
 
 
+# Console-only presentation. TensorBoard scalar names remain unchanged so old
+# dashboards and post-processing scripts continue to work.
+_EPISODE_METRIC_GROUPS = (
+    (
+        "速度跟踪",
+        (
+            "rew_tracking_lin_vel",
+            "rew_tracking_lin_vel_enhance",
+            "rew_tracking_lin_vel_l1",
+        ),
+    ),
+    (
+        "角速度跟踪",
+        (
+            "rew_tracking_ang_vel",
+            "rew_tracking_ang_vel_enhance",
+            "rew_tracking_ang_vel_l1",
+        ),
+    ),
+    (
+        "小陀螺实测",
+        (
+            "mean_spin_cmd_abs_yaw",
+            "mean_spin_real_abs_yaw",
+            "mean_spin_yaw_abs_error",
+            "spin_direction_accuracy",
+        ),
+    ),
+    (
+        "高度与姿态",
+        (
+            "rew_base_height",
+            "rew_base_height_enhance",
+            "rew_base_height_l1",
+            "rew_orientation",
+            "rew_ang_vel_xy",
+            "rew_lin_vel_z",
+            "max_abs_pitch_deg",
+            "max_tilt_deg",
+        ),
+    ),
+    (
+        "碰坎收腿与地形",
+        (
+            "rew_terrain_impact_tuck",
+            "terrain_tuck_active_fraction",
+            "mean_terrain_tuck_error",
+            "rew_terrain_pitch_excess",
+            "rew_terrain_pitch_rate",
+            "rew_wheel_support",
+            "rew_collision",
+            "terrain_level",
+        ),
+    ),
+    (
+        "原地旋转稳定性",
+        (
+            "rew_spin_stationary_lin_vel",
+            "rew_spin_stationary_ang_vel_xy",
+            "rew_spin_stationary_orientation",
+            "rew_spin_stationary_action_rate",
+            "rew_spin_stationary_action_smooth",
+            "mean_stationary_tilt_deg",
+            "rms_stationary_tilt_deg",
+        ),
+    ),
+    (
+        "动作平滑与能耗",
+        (
+            "rew_action_rate",
+            "rew_action_smooth",
+            "rew_dof_acc",
+            "rew_dof_vel",
+            "rew_dof_pos_limits",
+            "rew_torques",
+            "rew_nominal_state",
+            "rew_recovery_pose",
+        ),
+    ),
+)
+
+_EPISODE_METRIC_LABELS = {
+    "rew_tracking_lin_vel": "线速度跟踪奖励",
+    "rew_tracking_lin_vel_enhance": "线速度增强项",
+    "rew_tracking_lin_vel_l1": "线速度绝对误差惩罚",
+    "rew_tracking_ang_vel": "旋转速度跟踪奖励",
+    "rew_tracking_ang_vel_enhance": "旋转速度增强项",
+    "rew_tracking_ang_vel_l1": "旋转速度绝对误差惩罚",
+    "mean_spin_cmd_abs_yaw": "平均目标旋转速度",
+    "mean_spin_real_abs_yaw": "平均实际旋转速度",
+    "mean_spin_yaw_abs_error": "平均旋转速度误差",
+    "spin_direction_accuracy": "旋转方向正确率",
+    "rew_base_height": "机身高度奖励",
+    "rew_base_height_enhance": "机身高度增强项",
+    "rew_base_height_l1": "机身高度绝对误差惩罚",
+    "rew_orientation": "机身姿态惩罚",
+    "rew_ang_vel_xy": "横滚/俯仰角速度惩罚",
+    "rew_lin_vel_z": "竖直速度惩罚",
+    "max_abs_pitch_deg": "最大俯仰角（度）",
+    "max_tilt_deg": "最大倾斜角（度）",
+    "mean_stationary_tilt_deg": "静止平均倾斜角（度）",
+    "rms_stationary_tilt_deg": "静止RMS倾斜角（度）",
+    "rew_terrain_impact_tuck": "碰坎收腿奖励",
+    "terrain_tuck_active_fraction": "收腿触发时间占比",
+    "mean_terrain_tuck_error": "触发期间收腿姿态误差",
+    "rew_terrain_pitch_excess": "地形俯仰超限惩罚",
+    "rew_terrain_pitch_rate": "地形俯仰速度惩罚",
+    "rew_wheel_support": "双轮支撑奖励",
+    "rew_collision": "非期望碰撞惩罚",
+    "terrain_level": "平均地形等级",
+    "rew_spin_stationary_lin_vel": "旋转时平移漂移惩罚",
+    "rew_spin_stationary_ang_vel_xy": "旋转时横滚/俯仰速度惩罚",
+    "rew_spin_stationary_orientation": "旋转时姿态惩罚",
+    "rew_spin_stationary_action_rate": "旋转时动作变化惩罚",
+    "rew_spin_stationary_action_smooth": "旋转时动作平滑惩罚",
+    "rew_action_rate": "动作变化惩罚",
+    "rew_action_smooth": "动作平滑惩罚",
+    "rew_dof_acc": "关节加速度惩罚",
+    "rew_dof_vel": "关节速度惩罚",
+    "rew_dof_pos_limits": "关节限位惩罚",
+    "rew_torques": "力矩惩罚",
+    "rew_nominal_state": "偏离标称姿态惩罚",
+    "rew_recovery_pose": "起身姿态引导",
+}
+
+
+def _format_grouped_episode_metrics(values):
+    """Render episode metrics in compact Chinese groups for the terminal."""
+    lines = []
+    used = set()
+    for group_name, group_keys in _EPISODE_METRIC_GROUPS:
+        present = [key for key in group_keys if key in values]
+        if not present:
+            continue
+        # Do not print irrelevant groups such as SPIN metrics during descent.
+        if all(abs(values[key]) < 1.0e-12 for key in present):
+            used.update(present)
+            continue
+        lines.append(f"\n[{group_name}]")
+        for key in present:
+            label = _EPISODE_METRIC_LABELS.get(key, key)
+            lines.append(f"  {label} | {key} = {values[key]:.4f}")
+            used.add(key)
+
+    remaining = [key for key in values if key not in used]
+    if remaining:
+        lines.append("\n[其他指标]")
+        for key in remaining:
+            label = _EPISODE_METRIC_LABELS.get(key, key)
+            lines.append(f"  {label} | {key} = {values[key]:.4f}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 class OnPolicyRunner:
 
     def __init__(self, env: VecEnv, train_cfg, log_dir=None, device="cpu"):
@@ -190,7 +343,7 @@ class OnPolicyRunner:
         self.tot_time += locs["collection_time"] + locs["learn_time"]
         iteration_time = locs["collection_time"] + locs["learn_time"]
 
-        ep_string = f""
+        episode_values = {}
         if locs["ep_infos"]:
             for key in locs["ep_infos"][0]:
                 infotensor = torch.tensor([], device=self.device)
@@ -203,7 +356,19 @@ class OnPolicyRunner:
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
                 self.writer.add_scalar("Episode/" + key, value, locs["it"])
-                ep_string += f"""{f'Mean {key}:':>{pad}} {value:.4f}\n"""
+                episode_values[key] = value.item()
+        if os.getenv("WLG_GROUPED_CONSOLE_LOG", "1").strip().lower() in (
+            "0",
+            "false",
+            "no",
+            "off",
+        ):
+            ep_string = "".join(
+                f"{f'Mean {key}:':>{pad}} {value:.4f}\n"
+                for key, value in episode_values.items()
+            )
+        else:
+            ep_string = _format_grouped_episode_metrics(episode_values)
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(
             self.num_steps_per_env
@@ -236,19 +401,19 @@ class OnPolicyRunner:
                 locs["it"],
             )
 
-        str = f" \033[1m Learning iteration {locs['it'] + 1}/{locs['tot_iter']} \033[0m "
+        str = f" \033[1m 训练轮次 {locs['it'] + 1}/{locs['tot_iter']} \033[0m "
 
         if len(locs["rewbuffer"]) > 0:
             log_string = (
                 f"""{'#' * width}\n"""
                 f"""{str.center(width, ' ')}\n\n"""
-                f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                f"""{'Mean length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
+                f"""{'计算速度:':>{pad}} {fps:.0f} steps/s (采样: {locs[
+                            'collection_time']:.3f}s, 学习: {locs['learn_time']:.3f}s)\n"""
+                f"""{'价值函数损失:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                f"""{'策略代理损失:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                f"""{'平均动作噪声:':>{pad}} {mean_std.item():.2f}\n"""
+                f"""{'平均总奖励:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                f"""{'平均回合长度:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
             )
             #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
             #   f"""{'Mean length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
@@ -256,11 +421,11 @@ class OnPolicyRunner:
             log_string = (
                 f"""{'#' * width}\n"""
                 f"""{str.center(width, ' ')}\n\n"""
-                f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
+                f"""{'计算速度:':>{pad}} {fps:.0f} steps/s (采样: {locs[
+                            'collection_time']:.3f}s, 学习: {locs['learn_time']:.3f}s)\n"""
+                f"""{'价值函数损失:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                f"""{'策略代理损失:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                f"""{'平均动作噪声:':>{pad}} {mean_std.item():.2f}\n"""
             )
             #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
             #   f"""{'Mean length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
@@ -268,10 +433,10 @@ class OnPolicyRunner:
         log_string += ep_string
         log_string += (
             f"""{'-' * width}\n"""
-            f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-            f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-            f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-            f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] - locs['start_iter'] + 1) * (
+            f"""{'累计仿真步数:':>{pad}} {self.tot_timesteps}\n"""
+            f"""{'本轮耗时:':>{pad}} {iteration_time:.2f}s\n"""
+            f"""{'累计耗时:':>{pad}} {self.tot_time:.2f}s\n"""
+            f"""{'预计剩余:':>{pad}} {self.tot_time / (locs['it'] - locs['start_iter'] + 1) * (
                                locs['tot_iter'] - locs['it'] - 1):.1f}s\n"""
         )
         print(log_string)
