@@ -1852,6 +1852,11 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         ).unsqueeze(0)
+        self.terrain_impact_reverse_extend_joint_target = to_torch(
+            self.cfg.rewards.terrain_impact_reverse_extend_joint_target,
+            device=self.device,
+            requires_grad=False,
+        ).unsqueeze(0)
         if self.cfg.domain_rand.randomize_Kp:
             (
                 p_gains_scale_min,
@@ -2556,8 +2561,9 @@ class LeggedRobot(BaseTask):
         self.episode_terrain_tuck_active_steps += active
         self.episode_terrain_tuck_error_sum += tuck_error * active
         self.episode_terrain_tuck_trigger_count += trigger.float()
+        extend_target = self._terrain_impact_extend_target()
         extend_error = torch.mean(
-            torch.square(leg_pos - self.terrain_impact_extend_joint_target), dim=1
+            torch.square(leg_pos - extend_target), dim=1
         )
         catch_tilt = torch.atan2(
             torch.norm(self.projected_gravity[:, :2], dim=1),
@@ -2566,6 +2572,20 @@ class LeggedRobot(BaseTask):
         self.episode_terrain_extend_active_steps += extend_active
         self.episode_terrain_extend_error_sum += extend_error * extend_active
         self.episode_terrain_extend_tilt_sum += catch_tilt * extend_active
+
+    def _terrain_impact_extend_target(self):
+        """Select the catch pose from the commanded traversal direction.
+
+        In play controls, S is negative command_x and is the user's normal
+        forward descent. W is positive command_x and traverses the mirrored
+        descent course in reverse.
+        """
+        reverse_descent = (self.commands[:, 0] > 0.0).unsqueeze(1)
+        return torch.where(
+            reverse_descent,
+            self.terrain_impact_reverse_extend_joint_target,
+            self.terrain_impact_extend_joint_target,
+        )
 
     def _reward_terrain_impact_tuck(self):
         """Reward the requested compact pose during a one-shot tuck window."""
@@ -2595,8 +2615,9 @@ class LeggedRobot(BaseTask):
         """Reward the normal-height catch pose immediately after tucking."""
         active = (self.terrain_impact_extend_timer > 0).float()
         leg_pos = self.dof_pos[:, [0, 1, 3, 4]]
+        extend_target = self._terrain_impact_extend_target()
         extend_error = torch.mean(
-            torch.square(leg_pos - self.terrain_impact_extend_joint_target), dim=1
+            torch.square(leg_pos - extend_target), dim=1
         )
         return active * torch.exp(
             -extend_error / self.cfg.rewards.terrain_impact_extend_sigma
@@ -2607,8 +2628,9 @@ class LeggedRobot(BaseTask):
         active = (self.terrain_impact_extend_timer > 0).float()
         leg_pos = self.dof_pos[:, [0, 1, 3, 4]]
         leg_vel = self.dof_vel[:, [0, 1, 3, 4]]
+        extend_target = self._terrain_impact_extend_target()
         target_direction = torch.sign(
-            self.terrain_impact_extend_joint_target - leg_pos
+            extend_target - leg_pos
         )
         toward_target_speed = torch.clamp(
             target_direction * leg_vel, min=0.0, max=8.0

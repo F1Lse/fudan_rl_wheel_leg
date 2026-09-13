@@ -557,6 +557,10 @@ class LeggedRobotCfg(BaseConfig):
             "WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET",
             [0.60, 0.36, -0.60, -0.36],
         )
+        terrain_impact_reverse_extend_joint_target = _env_float_list(
+            "WLG_TERRAIN_IMPACT_REVERSE_EXTEND_JOINT_TARGET",
+            [0.30, 0.36, -0.30, -0.36],
+        )
         max_contact_force = 100.0  # forces above this value are penalized
 
     class normalization:

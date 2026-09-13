@@ -192,9 +192,9 @@ apply_common_environment() {
   export WLG_RECOVERY_MODE=1
 
   export WLG_MESH_TYPE=trimesh
-  # 35% negative-height pyramid stairs (climb away from the centre),
-  # 65% measured 50 mm curb + 150/200 mm double-drop course.
-  export WLG_TERRAIN_PROPORTIONS=0,0,0,0.35,0,0.65
+  # Only the measured 50 mm curb + 150/200 mm double-drop course. Its layout
+  # is mirrored around the spawn platform, so both command signs descend.
+  export WLG_TERRAIN_PROPORTIONS=0,0,0,0,0,1.0
   export WLG_CUSTOM_TERRAIN_MODE=descent_focus
   export WLG_TERRAIN_CURRICULUM=1
   export WLG_TERRAIN_PROGRESS_FRACTION=0.35
@@ -262,9 +262,12 @@ apply_common_environment() {
   export WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET=0.0,1.0,0.0,-1.0
   export WLG_TERRAIN_IMPACT_EXTEND_HOLD_S=0.18
   export WLG_TERRAIN_IMPACT_EXTEND_SIGMA=0.12
-  # Extend and swing the legs forward after clearing the curb. Besides
-  # reaching for the next surface, this catch pose actively brakes the body.
+  # S / negative command_x is the normal forward descent. Extend and swing the
+  # legs forward after clearing the curb to catch and actively brake the body.
   export WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET=0.60,0.36,-0.60,-0.36
+  # W / positive command_x traverses the mirrored descent in reverse and uses
+  # a less aggressive forward swing while retaining the extended leg length.
+  export WLG_TERRAIN_IMPACT_REVERSE_EXTEND_JOINT_TARGET=0.30,0.36,-0.30,-0.36
 }
 
 apply_stage_environment() {
@@ -473,10 +476,9 @@ apply_stage_environment() {
 
 print_stage_config() {
   local stage_index="$1"
-  printf '  terrain: 35%% pyramid climb + 65%% measured double drop\n'
-  printf '  climb_speed=%s, descent_speed=%s, climb_height=%s\n' \
-    "$WLG_MIXED_TERRAIN_LIN_VEL_MAX" "$WLG_MIXED_CUSTOM_LIN_VEL_MAX" \
-    "$WLG_STAIR_UP_FIXED_HEIGHT"
+  printf '  terrain: 100%% measured double drop, mirrored for S/W descent\n'
+  printf '  custom_descent_speed_limit=%s (symmetric positive/negative commands)\n' \
+    "$WLG_MIXED_CUSTOM_LIN_VEL_MAX"
   printf '  pitch soft=%s deg, terminal=%s deg after %ss\n' \
     "$WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG" \
     "$WLG_TERRAIN_PITCH_TERMINATION_DEG" "$WLG_FAIL_TO_TERMINAL_TIME_S"
@@ -492,7 +494,10 @@ print_stage_config() {
     "$WLG_TERRAIN_IMPACT_EXTEND_SCALE" \
     "$WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE" \
     "$WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE"
-  printf '  extend_target=[%s]\n' "$WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET"
+  printf '  S/negative extend_target=[%s]\n' \
+    "$WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET"
+  printf '  W/positive extend_target=[%s]\n' \
+    "$WLG_TERRAIN_IMPACT_REVERSE_EXTEND_JOINT_TARGET"
   printf '  target_checkpoint=%s\n' "${STAGE_TARGETS[$stage_index]}"
 }
 
