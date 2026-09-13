@@ -211,6 +211,8 @@ class LeggedRobotCfg(BaseConfig):
         # and uses safer terrain-specific limits elsewhere. The separated
         # variant keeps maximum flat translation and yaw mostly in different
         # samples, which is safer when extending the final speed ceiling.
+        # spin_fixed is for a dedicated in-place-spin policy: most samples use
+        # the exact stage magnitude, with small idle and near-target groups.
         # spin_mixed keeps a dedicated low-body/high-yaw anchor while also
         # sampling height-changing spins and combined translation/yaw. On
         # trimesh it applies separate, lower command limits away from flat.
@@ -224,6 +226,7 @@ class LeggedRobotCfg(BaseConfig):
                 "mixed_final",
                 "mixed_flat_highspeed",
                 "mixed_highstand_anchor",
+                "spin_fixed",
                 "spin_mixed",
             },
         )
@@ -254,6 +257,15 @@ class LeggedRobotCfg(BaseConfig):
         spin_low_height_min = _env_float("WLG_SPIN_LOW_HEIGHT_MIN", 0.16)
         spin_low_height_max = _env_float("WLG_SPIN_LOW_HEIGHT_MAX", 0.20)
         spin_high_yaw_min = _env_float("WLG_SPIN_HIGH_YAW_MIN", 7.0)
+        spin_fixed_idle_fraction = _env_float(
+            "WLG_SPIN_FIXED_IDLE_FRACTION", 0.10
+        )
+        spin_fixed_near_fraction = _env_float(
+            "WLG_SPIN_FIXED_NEAR_FRACTION", 0.10
+        )
+        spin_fixed_near_min_ratio = _env_float(
+            "WLG_SPIN_FIXED_NEAR_MIN_RATIO", 0.90
+        )
         spin_high_yaw_lin_vel_max = _env_float(
             "WLG_SPIN_HIGH_YAW_LIN_VEL_MAX", 0.5
         )

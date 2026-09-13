@@ -33,14 +33,14 @@ STAGE_LABELS=(
 # Absolute checkpoint numbers continuing from the stable model_56500.pt.
 STAGE_TARGETS=(56800 57100 57500 58000 58600 59400 60400 61400)
 STAGE_RUN_NAMES=(
-  spin_v2_56500_longlegs_s01_yaw_1
-  spin_v2_56500_longlegs_s02_yaw_2
-  spin_v2_56500_longlegs_s03_yaw_3
-  spin_v2_56500_longlegs_s04_yaw_5
-  spin_v2_56500_longlegs_s05_yaw_7
-  spin_v2_56500_longlegs_s06_yaw_10
-  spin_v2_56500_longlegs_s07_yaw_13
-  spin_v2_56500_longlegs_s08_yaw_13_stable
+  spin_fixed_56500_longlegs_s01_yaw_1
+  spin_fixed_56500_longlegs_s02_yaw_2
+  spin_fixed_56500_longlegs_s03_yaw_3
+  spin_fixed_56500_longlegs_s04_yaw_5
+  spin_fixed_56500_longlegs_s05_yaw_7
+  spin_fixed_56500_longlegs_s06_yaw_10
+  spin_fixed_56500_longlegs_s07_yaw_13
+  spin_fixed_56500_longlegs_s08_yaw_13_stable
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -222,7 +222,7 @@ apply_common_environment() {
   export WLG_TERRAIN_CURRICULUM=0
   export WLG_SLOPE_THRESHOLD=0.45
   export WLG_COMMAND_CURRICULUM=0
-  export WLG_COMMAND_PROFILE=independent
+  export WLG_COMMAND_PROFILE=spin_fixed
   # Long holds are closer to joystick operation and avoid repeated +limit to
   # -limit steps before the policy has time to settle.
   export WLG_COMMAND_RESAMPLING_TIME=8.0
@@ -279,6 +279,9 @@ apply_common_environment() {
   export WLG_SPIN_LOW_HEIGHT_MIN=0.16
   export WLG_SPIN_LOW_HEIGHT_MAX=0.20
   export WLG_SPIN_HIGH_YAW_MIN=1.0
+  export WLG_SPIN_FIXED_IDLE_FRACTION=0.10
+  export WLG_SPIN_FIXED_NEAR_FRACTION=0.10
+  export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.90
   export WLG_SPIN_HIGH_YAW_LIN_VEL_MAX=0.0
   export WLG_SPIN_MOVING_LIN_VEL_MAX=0.0
   export WLG_SPIN_MOVING_YAW_MAX=1.0
@@ -377,6 +380,7 @@ print_stage_config() {
     "$WLG_LIN_VEL_X_MIN" "$WLG_LIN_VEL_X_MAX" \
     "$WLG_ANG_VEL_YAW_MIN" "$WLG_ANG_VEL_YAW_MAX" \
     "$WLG_HEIGHT_MIN" "$WLG_HEIGHT_MAX"
+  printf '  fixed_spin: exact=80%%, near=10%%, idle=10%%\n'
   printf '  yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
     "$WLG_TRACKING_ANG_VEL_L1_SCALE" "$WLG_CLIP_SINGLE_REWARD" \
     "$WLG_COMMAND_RESAMPLING_TIME"

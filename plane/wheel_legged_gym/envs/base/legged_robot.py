@@ -872,6 +872,48 @@ class LeggedRobot(BaseTask):
             env_ids, 0
         ]
 
+        if self.cfg.commands.command_profile == "spin_fixed":
+            # A dedicated SPIN ONNX is selected only for in-place rotation.
+            # Train its real deployment points instead of diluting the batch
+            # with a uniform distribution from zero to the stage limit:
+            #   80% exact ±limit, 10% near ±limit, 10% zero/start-stop anchor.
+            count = len(env_ids)
+            if count:
+                profile = torch.rand(count, device=self.device)
+                idle_fraction = min(
+                    max(self.cfg.commands.spin_fixed_idle_fraction, 0.0), 1.0
+                )
+                near_fraction = min(
+                    max(self.cfg.commands.spin_fixed_near_fraction, 0.0),
+                    1.0 - idle_fraction,
+                )
+                near_ratio = min(
+                    max(self.cfg.commands.spin_fixed_near_min_ratio, 0.0), 1.0
+                )
+                idle = profile < idle_fraction
+                near = (profile >= idle_fraction) & (
+                    profile < idle_fraction + near_fraction
+                )
+
+                yaw_limit = torch.maximum(
+                    torch.abs(self.command_ranges["ang_vel_yaw"][env_ids, 0]),
+                    torch.abs(self.command_ranges["ang_vel_yaw"][env_ids, 1]),
+                )
+                yaw_magnitude = yaw_limit.clone()
+                yaw_magnitude[near] = yaw_magnitude[near] * (
+                    near_ratio
+                    + (1.0 - near_ratio)
+                    * torch.rand(int(near.sum().item()), device=self.device)
+                )
+                yaw_sign = torch.where(
+                    torch.rand(count, device=self.device) < 0.5,
+                    -torch.ones(count, device=self.device),
+                    torch.ones(count, device=self.device),
+                )
+                self.commands[env_ids, 0] = 0.0
+                self.commands[env_ids, 1] = yaw_sign * yaw_magnitude
+                self.commands[env_ids[idle], 1] = 0.0
+
         if self.cfg.commands.command_profile == "spin_mixed":
             # A single deployable SPIN policy needs several deliberately
             # different operating points. Independent sampling underrepresents
