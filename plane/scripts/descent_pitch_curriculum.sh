@@ -17,9 +17,10 @@ STAGE_KEYS=(
   reactive_tuck_adaptation
   reactive_tuck_speed
   reflex_speed_1p5
-  reflex_speed_1p7
-  reflex_speed_1p9
-  reflex_speed_2p0
+  reflex_catch_1p5
+  reflex_catch_1p7
+  reflex_catch_1p9
+  reflex_catch_2p0
 )
 STAGE_LABELS=(
   "低速适应：认识俯仰约束"
@@ -28,11 +29,12 @@ STAGE_LABELS=(
   "受阻收腿入门：低速学习碰坎反应"
   "受阻收腿提速：保持通过而不停车"
   "一次性收腿反射：1.5 m/s"
-  "一次性收腿反射：1.7 m/s"
-  "一次性收腿反射：1.9 m/s"
-  "高速收腿巩固：2.0 m/s"
+  "收腿后伸腿接地：1.5 m/s"
+  "收伸接地反射：1.7 m/s"
+  "收伸接地反射：1.9 m/s"
+  "高速收伸接地巩固：2.0 m/s"
 )
-STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69500)
+STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69000 70500)
 STAGE_RUN_NAMES=(
   descent_pitch_longlegs_s01_adaptation
   descent_pitch_longlegs_s02_controlled_speed
@@ -40,9 +42,10 @@ STAGE_RUN_NAMES=(
   descent_reactive_longlegs_s04_tuck_adaptation
   descent_reactive_longlegs_s05_tuck_speed
   descent_reflex_longlegs_s06_speed_1p5
-  descent_reflex_longlegs_s07_speed_1p7
-  descent_reflex_longlegs_s08_speed_1p9
-  descent_reflex_longlegs_s09_speed_2p0
+  descent_catch_longlegs_s07_speed_1p5
+  descent_catch_longlegs_s08_speed_1p7
+  descent_catch_longlegs_s09_speed_1p9
+  descent_catch_longlegs_s10_speed_2p0
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -247,6 +250,9 @@ apply_common_environment() {
   export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=0.0
   export WLG_TERRAIN_IMPACT_TUCK_SCALE=0.0
   export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.0
+  export WLG_TERRAIN_IMPACT_EXTEND_SCALE=0.0
+  export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.0
+  export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=0.0
   export WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE=15.0
   export WLG_TERRAIN_IMPACT_FORCE_RATIO=0.35
   export WLG_TERRAIN_IMPACT_SPEED_RATIO=0.75
@@ -254,6 +260,11 @@ apply_common_environment() {
   export WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S=0.80
   export WLG_TERRAIN_IMPACT_TUCK_SIGMA=0.20
   export WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET=0.0,1.0,0.0,-1.0
+  export WLG_TERRAIN_IMPACT_EXTEND_HOLD_S=0.18
+  export WLG_TERRAIN_IMPACT_EXTEND_SIGMA=0.12
+  # Extend and swing the legs forward after clearing the curb. Besides
+  # reaching for the next surface, this catch pose actively brakes the body.
+  export WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET=0.60,0.36,-0.60,-0.36
 }
 
 apply_stage_environment() {
@@ -356,7 +367,32 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.15
       export WLG_ENTROPY_COEF=0.002
       ;;
-    reflex_speed_1p7)
+    reflex_catch_1p5)
+      export WLG_MAX_INIT_TERRAIN_LEVEL=3
+      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=0.9
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.5
+      export WLG_STAIR_UP_FIXED_HEIGHT=0.30
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.5
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.50
+      export WLG_CLIP_SINGLE_REWARD=3.0
+      export WLG_BASE_HEIGHT_SCALE=2.5
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_BASE_HEIGHT_L1_SCALE=-0.7
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=16
+      export WLG_TERRAIN_PITCH_TERMINATION_DEG=32
+      export WLG_FAIL_TO_TERMINAL_TIME_S=0.16
+      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-34.0
+      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.38
+      export WLG_TERRAIN_IMPACT_TUCK_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.20
+      export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.14
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-10.0
+      export WLG_ENTROPY_COEF=0.0018
+      ;;
+    reflex_catch_1p7)
       export WLG_MAX_INIT_TERRAIN_LEVEL=3
       export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
       export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.7
@@ -376,9 +412,12 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_TUCK_SCALE=3.0
       export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.20
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.14
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-11.0
       export WLG_ENTROPY_COEF=0.0018
       ;;
-    reflex_speed_1p9)
+    reflex_catch_1p9)
       export WLG_MAX_INIT_TERRAIN_LEVEL=4
       export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.1
       export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.9
@@ -398,9 +437,12 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_TUCK_SCALE=2.8
       export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.18
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.13
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=2.8
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.18
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-12.0
       export WLG_ENTROPY_COEF=0.0015
       ;;
-    reflex_speed_2p0)
+    reflex_catch_2p0)
       export WLG_MAX_INIT_TERRAIN_LEVEL=5
       export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
       export WLG_MIXED_CUSTOM_LIN_VEL_MAX=2.0
@@ -420,6 +462,9 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_TUCK_SCALE=2.6
       export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.16
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.12
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=2.6
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.16
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-14.0
       export WLG_ENTROPY_COEF=0.0012
       ;;
     *) echo "Unknown stage: ${STAGE_KEYS[$stage_index]}" >&2; exit 2 ;;
@@ -442,6 +487,12 @@ print_stage_config() {
     "$WLG_TERRAIN_IMPACT_TUCK_HOLD_S" \
     "$WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S" \
     "$WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET"
+  printf '  extend_hold=%ss, extend=%s, extend_velocity=%s, catch_orientation=%s\n' \
+    "$WLG_TERRAIN_IMPACT_EXTEND_HOLD_S" \
+    "$WLG_TERRAIN_IMPACT_EXTEND_SCALE" \
+    "$WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE" \
+    "$WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE"
+  printf '  extend_target=[%s]\n' "$WLG_TERRAIN_IMPACT_EXTEND_JOINT_TARGET"
   printf '  target_checkpoint=%s\n' "${STAGE_TARGETS[$stage_index]}"
 }
 
