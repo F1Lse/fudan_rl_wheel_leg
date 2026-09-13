@@ -487,6 +487,9 @@ class LeggedRobotCfg(BaseConfig):
             terrain_impact_tuck = _env_float(
                 "WLG_TERRAIN_IMPACT_TUCK_SCALE", 0.0
             )
+            terrain_impact_tuck_velocity = _env_float(
+                "WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE", 0.0
+            )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
@@ -523,6 +526,9 @@ class LeggedRobotCfg(BaseConfig):
         )
         terrain_impact_tuck_hold_s = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_HOLD_S", 0.30
+        )
+        terrain_impact_tuck_cooldown_s = _env_float(
+            "WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S", 0.80
         )
         terrain_impact_tuck_sigma = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_SIGMA", 0.20
