@@ -365,6 +365,11 @@ class LeggedRobot(BaseTask):
             * 180.0
             / math.pi
         )
+        episode_max_terrain_impact_pitch_deg = (
+            torch.mean(self.episode_max_terrain_impact_pitch[env_ids])
+            * 180.0
+            / math.pi
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -406,6 +411,7 @@ class LeggedRobot(BaseTask):
         self.episode_terrain_extend_active_steps[env_ids] = 0.0
         self.episode_terrain_extend_error_sum[env_ids] = 0.0
         self.episode_terrain_extend_tilt_sum[env_ids] = 0.0
+        self.episode_max_terrain_impact_pitch[env_ids] = 0.0
         self.terrain_impact_tuck_timer[env_ids] = 0
         self.terrain_impact_extend_timer[env_ids] = 0
         self.terrain_impact_tuck_cooldown_timer[env_ids] = 0
@@ -459,6 +465,9 @@ class LeggedRobot(BaseTask):
         )
         self.extras["episode"]["mean_terrain_catch_tilt_deg"] = (
             episode_mean_terrain_catch_tilt_deg
+        )
+        self.extras["episode"]["max_terrain_impact_pitch_deg"] = (
+            episode_max_terrain_impact_pitch_deg
         )
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
@@ -1764,6 +1773,9 @@ class LeggedRobot(BaseTask):
         self.episode_terrain_extend_tilt_sum = torch.zeros_like(
             self.episode_stationary_tilt_sum
         )
+        self.episode_max_terrain_impact_pitch = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
         self.terrain_impact_tuck_timer = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -2480,6 +2492,8 @@ class LeggedRobot(BaseTask):
             or "terrain_impact_extend" in self.reward_scales
             or "terrain_impact_extend_velocity" in self.reward_scales
             or "terrain_impact_extend_orientation" in self.reward_scales
+            or "terrain_impact_pitch" in self.reward_scales
+            or "terrain_impact_pitch_rate" in self.reward_scales
         ):
             return
         wheel_forces = self.contact_forces[:, self.feet_indices, :]
@@ -2573,6 +2587,14 @@ class LeggedRobot(BaseTask):
         self.episode_terrain_extend_active_steps += extend_active
         self.episode_terrain_extend_error_sum += extend_error * extend_active
         self.episode_terrain_extend_tilt_sum += catch_tilt * extend_active
+        reflex_active = torch.maximum(active, extend_active)
+        impact_abs_pitch = torch.asin(
+            torch.clamp(torch.abs(self.projected_gravity[:, 0]), max=1.0)
+        )
+        self.episode_max_terrain_impact_pitch = torch.maximum(
+            self.episode_max_terrain_impact_pitch,
+            impact_abs_pitch * reflex_active,
+        )
 
     def _terrain_impact_extend_target(self):
         """Select the catch pose from the commanded traversal direction.
@@ -2658,6 +2680,22 @@ class LeggedRobot(BaseTask):
         """Penalize roll/pitch while the wheels are catching the next surface."""
         active = (self.terrain_impact_extend_timer > 0).float()
         return active * torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+
+    def _reward_terrain_impact_pitch(self):
+        """Penalize pitch specifically throughout the complete impact reflex."""
+        active = torch.maximum(
+            (self.terrain_impact_tuck_timer > 0).float(),
+            (self.terrain_impact_extend_timer > 0).float(),
+        )
+        return active * torch.square(self.projected_gravity[:, 0])
+
+    def _reward_terrain_impact_pitch_rate(self):
+        """Suppress the pitch impulse while tucking and catching the surface."""
+        active = torch.maximum(
+            (self.terrain_impact_tuck_timer > 0).float(),
+            (self.terrain_impact_extend_timer > 0).float(),
+        )
+        return active * torch.square(self.base_ang_vel[:, 1])
 
     def _reward_base_height(self):
         # Penalize base height away from target

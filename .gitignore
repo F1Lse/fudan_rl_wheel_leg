@@ -165,3 +165,4 @@ mujoco/python_tools/*tuixiong*.py
 # YAML / JSON / CSV
 # PNG训练曲线
 # ==================================================
+plane_logs.tar.gz

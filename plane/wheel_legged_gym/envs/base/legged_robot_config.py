@@ -504,6 +504,12 @@ class LeggedRobotCfg(BaseConfig):
             terrain_impact_extend_orientation = _env_float(
                 "WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE", 0.0
             )
+            terrain_impact_pitch = _env_float(
+                "WLG_TERRAIN_IMPACT_PITCH_SCALE", 0.0
+            )
+            terrain_impact_pitch_rate = _env_float(
+                "WLG_TERRAIN_IMPACT_PITCH_RATE_SCALE", 0.0
+            )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
