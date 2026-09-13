@@ -239,6 +239,15 @@ class LeggedRobotCfg(BaseConfig):
         mixed_custom_lin_vel_max = _env_float(
             "WLG_MIXED_CUSTOM_LIN_VEL_MAX", 2.5
         )
+        # Optionally replace part of the uniform custom-terrain command batch
+        # with commands near the speed limit.  A zero fraction preserves the
+        # historical sampling distribution used by every existing stage.
+        mixed_custom_high_speed_fraction = _env_float(
+            "WLG_MIXED_CUSTOM_HIGH_SPEED_FRACTION", 0.0
+        )
+        mixed_custom_high_speed_min = _env_float(
+            "WLG_MIXED_CUSTOM_HIGH_SPEED_MIN", 0.0
+        )
         mixed_custom_yaw_max = _env_float("WLG_MIXED_CUSTOM_YAW_MAX", 1.0)
         # In the final mixed policy, reserve part of the flat-ground batch for
         # exact zero-speed, high-body commands. This makes the deployment's

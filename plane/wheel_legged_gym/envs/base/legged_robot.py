@@ -1164,16 +1164,47 @@ class LeggedRobot(BaseTask):
                     2.0 * torch.rand(terrain_count, device=self.device) - 1.0
                 ) * terrain_yaw_max
 
-            # The measured curb/drop courses remain mostly straight but retain
-            # the requested 2.5 m/s traversal target.
+            # The measured curb/drop courses remain mostly straight.  Selected
+            # curriculum stages can oversample both signs near the speed limit
+            # without changing the observation or action interface.
             custom_count = int(custom_mask.sum().item())
             if custom_count:
                 custom_lin_max = self.cfg.commands.mixed_custom_lin_vel_max
                 custom_yaw_max = self.cfg.commands.mixed_custom_yaw_max
-                self.commands[env_ids[custom_mask], 0] = (
+                custom_ids_selected = env_ids[custom_mask]
+                custom_lin_commands = (
                     2.0 * torch.rand(custom_count, device=self.device) - 1.0
                 ) * custom_lin_max
-                self.commands[env_ids[custom_mask], 1] = (
+                high_speed_fraction = min(
+                    max(
+                        self.cfg.commands.mixed_custom_high_speed_fraction,
+                        0.0,
+                    ),
+                    1.0,
+                )
+                high_speed_min = min(
+                    max(self.cfg.commands.mixed_custom_high_speed_min, 0.0),
+                    custom_lin_max,
+                )
+                high_speed_mask = (
+                    torch.rand(custom_count, device=self.device)
+                    < high_speed_fraction
+                )
+                high_speed_count = int(high_speed_mask.sum().item())
+                if high_speed_count:
+                    high_speed_magnitude = high_speed_min + (
+                        custom_lin_max - high_speed_min
+                    ) * torch.rand(high_speed_count, device=self.device)
+                    high_speed_sign = torch.where(
+                        torch.rand(high_speed_count, device=self.device) < 0.5,
+                        -torch.ones(high_speed_count, device=self.device),
+                        torch.ones(high_speed_count, device=self.device),
+                    )
+                    custom_lin_commands[high_speed_mask] = (
+                        high_speed_sign * high_speed_magnitude
+                    )
+                self.commands[custom_ids_selected, 0] = custom_lin_commands
+                self.commands[custom_ids_selected, 1] = (
                     2.0 * torch.rand(custom_count, device=self.device) - 1.0
                 ) * custom_yaw_max
 
