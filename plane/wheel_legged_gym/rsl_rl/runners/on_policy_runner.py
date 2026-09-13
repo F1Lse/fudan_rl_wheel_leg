@@ -91,6 +91,7 @@ _EPISODE_METRIC_GROUPS = (
         (
             "rew_terrain_impact_tuck",
             "rew_terrain_impact_tuck_velocity",
+            "rew_terrain_impact_drive",
             "rew_terrain_impact_extend",
             "rew_terrain_impact_extend_velocity",
             "rew_terrain_impact_extend_orientation",
@@ -157,6 +158,7 @@ _EPISODE_METRIC_LABELS = {
     "rms_stationary_tilt_deg": "静止RMS倾斜角（度）",
     "rew_terrain_impact_tuck": "碰坎收腿奖励",
     "rew_terrain_impact_tuck_velocity": "收腿方向速度奖励",
+    "rew_terrain_impact_drive": "收伸期间持续驱动奖励",
     "rew_terrain_impact_extend": "越坎伸腿接地奖励",
     "rew_terrain_impact_extend_velocity": "伸腿方向速度奖励",
     "rew_terrain_impact_extend_orientation": "接地阶段姿态惩罚",

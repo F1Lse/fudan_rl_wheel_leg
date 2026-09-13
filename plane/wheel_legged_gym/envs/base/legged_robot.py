@@ -2476,6 +2476,7 @@ class LeggedRobot(BaseTask):
         if not (
             "terrain_impact_tuck" in self.reward_scales
             or "terrain_impact_tuck_velocity" in self.reward_scales
+            or "terrain_impact_drive" in self.reward_scales
             or "terrain_impact_extend" in self.reward_scales
             or "terrain_impact_extend_velocity" in self.reward_scales
             or "terrain_impact_extend_orientation" in self.reward_scales
@@ -2609,7 +2610,23 @@ class LeggedRobot(BaseTask):
         toward_target_speed = torch.clamp(
             target_direction * leg_vel, min=0.0, max=8.0
         )
-        return active * torch.mean(toward_target_speed, dim=1)
+        speed_gain = 1.0 + self.cfg.rewards.terrain_impact_tuck_speed_gain * torch.abs(
+            self.commands[:, 0]
+        )
+        return active * speed_gain * torch.mean(toward_target_speed, dim=1)
+
+    def _reward_terrain_impact_drive(self):
+        """Keep driving in the commanded direction throughout the reflex."""
+        active = torch.maximum(
+            (self.terrain_impact_tuck_timer > 0).float(),
+            (self.terrain_impact_extend_timer > 0).float(),
+        )
+        command_speed = torch.abs(self.commands[:, 0])
+        directional_speed = torch.sign(self.commands[:, 0]) * self.base_lin_vel[:, 0]
+        normalized_progress = torch.clamp(
+            directional_speed / (command_speed + 0.10), min=0.0, max=1.0
+        )
+        return active * normalized_progress
 
     def _reward_terrain_impact_extend(self):
         """Reward the normal-height catch pose immediately after tucking."""

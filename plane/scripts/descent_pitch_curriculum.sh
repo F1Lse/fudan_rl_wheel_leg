@@ -20,7 +20,10 @@ STAGE_KEYS=(
   reflex_catch_1p5
   reflex_catch_1p7
   reflex_catch_1p9
-  reflex_catch_2p0
+  reflex_drive_1p7
+  reflex_tuck_boost_1p7
+  reflex_tuck_boost_1p9
+  reflex_tuck_boost_2p0
 )
 STAGE_LABELS=(
   "低速适应：认识俯仰约束"
@@ -32,9 +35,12 @@ STAGE_LABELS=(
   "收腿后伸腿接地：1.5 m/s"
   "收伸接地反射：1.7 m/s"
   "收伸接地反射：1.9 m/s"
-  "高速收伸接地巩固：2.0 m/s"
+  "快速收腿并持续驱轮：1.7 m/s"
+  "提前触发并强化收腿：1.7 m/s"
+  "提前触发并强化收腿：1.9 m/s"
+  "高速快速收腿驱轮巩固：2.0 m/s"
 )
-STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69000 70500)
+STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69000 70000 71000 72000 73500)
 STAGE_RUN_NAMES=(
   descent_pitch_longlegs_s01_adaptation
   descent_pitch_longlegs_s02_controlled_speed
@@ -45,7 +51,10 @@ STAGE_RUN_NAMES=(
   descent_catch_longlegs_s07_speed_1p5
   descent_catch_longlegs_s08_speed_1p7
   descent_catch_longlegs_s09_speed_1p9
-  descent_catch_longlegs_s10_speed_2p0
+  descent_drive_longlegs_s10_speed_1p7
+  descent_tuck_boost_longlegs_s11_speed_1p7
+  descent_tuck_boost_longlegs_s12_speed_1p9
+  descent_tuck_boost_longlegs_s13_speed_2p0
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -250,6 +259,7 @@ apply_common_environment() {
   export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=0.0
   export WLG_TERRAIN_IMPACT_TUCK_SCALE=0.0
   export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.0
+  export WLG_TERRAIN_IMPACT_DRIVE_SCALE=0.0
   export WLG_TERRAIN_IMPACT_EXTEND_SCALE=0.0
   export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.0
   export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=0.0
@@ -259,6 +269,7 @@ apply_common_environment() {
   export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.30
   export WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S=0.80
   export WLG_TERRAIN_IMPACT_TUCK_SIGMA=0.20
+  export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=0.0
   export WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET=0.0,1.0,0.0,-1.0
   export WLG_TERRAIN_IMPACT_EXTEND_HOLD_S=0.18
   export WLG_TERRAIN_IMPACT_EXTEND_SIGMA=0.12
@@ -445,14 +456,102 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-12.0
       export WLG_ENTROPY_COEF=0.0015
       ;;
-    reflex_catch_2p0)
+    reflex_drive_1p7)
+      export WLG_MAX_INIT_TERRAIN_LEVEL=3
+      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.7
+      export WLG_STAIR_UP_FIXED_HEIGHT=0.30
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.8
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.55
+      export WLG_CLIP_SINGLE_REWARD=4.0
+      export WLG_BASE_HEIGHT_SCALE=2.5
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_BASE_HEIGHT_L1_SCALE=-0.7
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=15
+      export WLG_TERRAIN_PITCH_TERMINATION_DEG=32
+      export WLG_FAIL_TO_TERMINAL_TIME_S=0.16
+      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-36.0
+      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.40
+      export WLG_TERRAIN_IMPACT_SPEED_RATIO=1.10
+      export WLG_TERRAIN_IMPACT_TUCK_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.24
+      export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=0.40
+      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.14
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-11.0
+      export WLG_ENTROPY_COEF=0.0018
+      ;;
+    reflex_tuck_boost_1p7)
+      export WLG_MAX_INIT_TERRAIN_LEVEL=3
+      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.7
+      export WLG_STAIR_UP_FIXED_HEIGHT=0.30
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.8
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.55
+      export WLG_CLIP_SINGLE_REWARD=4.0
+      export WLG_BASE_HEIGHT_SCALE=2.5
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
+      export WLG_BASE_HEIGHT_L1_SCALE=-0.7
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=15
+      export WLG_TERRAIN_PITCH_TERMINATION_DEG=32
+      export WLG_FAIL_TO_TERMINAL_TIME_S=0.16
+      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-36.0
+      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.40
+      export WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE=10.0
+      export WLG_TERRAIN_IMPACT_FORCE_RATIO=0.25
+      export WLG_TERRAIN_IMPACT_SPEED_RATIO=1.25
+      export WLG_TERRAIN_IMPACT_TUCK_SCALE=4.0
+      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.40
+      export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=0.60
+      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=3.5
+      export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.14
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-11.0
+      export WLG_ENTROPY_COEF=0.0015
+      ;;
+    reflex_tuck_boost_1p9)
+      export WLG_MAX_INIT_TERRAIN_LEVEL=4
+      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.1
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=1.9
+      export WLG_STAIR_UP_FIXED_HEIGHT=0.32
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=2.0
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.52
+      export WLG_CLIP_SINGLE_REWARD=4.0
+      export WLG_BASE_HEIGHT_SCALE=2.7
+      export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.7
+      export WLG_BASE_HEIGHT_L1_SCALE=-0.75
+      export WLG_ORIENTATION_SCALE=-10.5
+      export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=14
+      export WLG_TERRAIN_PITCH_TERMINATION_DEG=31
+      export WLG_FAIL_TO_TERMINAL_TIME_S=0.15
+      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-40.0
+      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.45
+      export WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE=10.0
+      export WLG_TERRAIN_IMPACT_FORCE_RATIO=0.25
+      export WLG_TERRAIN_IMPACT_SPEED_RATIO=1.25
+      export WLG_TERRAIN_IMPACT_TUCK_SCALE=4.0
+      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.45
+      export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=0.70
+      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=4.0
+      export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.13
+      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=2.8
+      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.18
+      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-12.0
+      export WLG_ENTROPY_COEF=0.0015
+      ;;
+    reflex_tuck_boost_2p0)
       export WLG_MAX_INIT_TERRAIN_LEVEL=5
       export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
       export WLG_MIXED_CUSTOM_LIN_VEL_MAX=2.0
       export WLG_STAIR_UP_FIXED_HEIGHT=0.33
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=2.0
-      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.45
-      export WLG_CLIP_SINGLE_REWARD=3.0
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=2.2
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.50
+      export WLG_CLIP_SINGLE_REWARD=4.0
       export WLG_BASE_HEIGHT_SCALE=3.0
       export WLG_BASE_HEIGHT_ENHANCE_SCALE=2.0
       export WLG_BASE_HEIGHT_L1_SCALE=-0.8
@@ -460,10 +559,15 @@ apply_stage_environment() {
       export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=13
       export WLG_TERRAIN_PITCH_TERMINATION_DEG=30
       export WLG_FAIL_TO_TERMINAL_TIME_S=0.14
-      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-40.0
-      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.45
-      export WLG_TERRAIN_IMPACT_TUCK_SCALE=2.6
-      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.16
+      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-45.0
+      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.50
+      export WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE=10.0
+      export WLG_TERRAIN_IMPACT_FORCE_RATIO=0.25
+      export WLG_TERRAIN_IMPACT_SPEED_RATIO=1.25
+      export WLG_TERRAIN_IMPACT_TUCK_SCALE=4.0
+      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.50
+      export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=0.80
+      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=4.5
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.12
       export WLG_TERRAIN_IMPACT_EXTEND_SCALE=2.6
       export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.16
@@ -482,9 +586,10 @@ print_stage_config() {
   printf '  pitch soft=%s deg, terminal=%s deg after %ss\n' \
     "$WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG" \
     "$WLG_TERRAIN_PITCH_TERMINATION_DEG" "$WLG_FAIL_TO_TERMINAL_TIME_S"
-  printf '  speed_l1=%s, impact_tuck=%s, tuck_velocity=%s\n' \
+  printf '  speed_l1=%s, impact_tuck=%s, tuck_velocity=%s, reflex_drive=%s\n' \
     "$WLG_TRACKING_LIN_VEL_L1_SCALE" "$WLG_TERRAIN_IMPACT_TUCK_SCALE" \
-    "$WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE"
+    "$WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE" \
+    "$WLG_TERRAIN_IMPACT_DRIVE_SCALE"
   printf '  tuck_hold=%ss, cooldown=%ss, target=[%s]\n' \
     "$WLG_TERRAIN_IMPACT_TUCK_HOLD_S" \
     "$WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S" \

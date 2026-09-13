@@ -490,6 +490,9 @@ class LeggedRobotCfg(BaseConfig):
             terrain_impact_tuck_velocity = _env_float(
                 "WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE", 0.0
             )
+            terrain_impact_drive = _env_float(
+                "WLG_TERRAIN_IMPACT_DRIVE_SCALE", 0.0
+            )
             # Second half of the teacher-only impact reflex: after the short
             # tuck window, extend the legs promptly to catch the next surface.
             terrain_impact_extend = _env_float(
@@ -543,6 +546,9 @@ class LeggedRobotCfg(BaseConfig):
         )
         terrain_impact_tuck_sigma = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_SIGMA", 0.20
+        )
+        terrain_impact_tuck_speed_gain = _env_float(
+            "WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN", 0.0
         )
         terrain_impact_tuck_joint_target = _env_float_list(
             "WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET", [0.0, 1.0, 0.0, -1.0]
