@@ -11,33 +11,36 @@ BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-56500}"
 BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-flat_stability_longlegs_s05_final_mixed_consolidation}"
 
 STAGE_KEYS=(
-  low_yaw_7
-  low_yaw_10
-  low_yaw_13
-  spin_height
-  flat_combined
-  mild_terrain
-  final_consolidation
+  yaw_1
+  yaw_2
+  yaw_3
+  yaw_5
+  yaw_7
+  yaw_10
+  yaw_13
+  yaw_13_stable
 )
 STAGE_LABELS=(
-  "低位原地旋转：0.16 m、yaw ±7"
-  "低位原地旋转：0.16 m、yaw ±10"
+  "低位原地旋转入门：0.16 m、yaw ±1"
+  "低位原地旋转：0.16 m、yaw ±2"
+  "低位原地旋转：0.16 m、yaw ±3"
+  "低位原地旋转：0.16 m、yaw ±5"
+  "低位高速旋转：0.16 m、yaw ±7"
+  "低位高速旋转：0.16 m、yaw ±10"
   "低位高速旋转：0.16 m、yaw ±13"
-  "原地旋转中变高度：0.16–0.33 m"
-  "平地综合旋转：原地、变高度与平移转向"
-  "轻度地形旋转：平地、缓坡与起伏"
-  "最终综合巩固：保留 ±13 与地形移动转向"
+  "±13 原地旋转稳定性巩固"
 )
 # Absolute checkpoint numbers continuing from the stable model_56500.pt.
-STAGE_TARGETS=(59500 61500 63500 65500 68500 71500 73500)
+STAGE_TARGETS=(56800 57100 57500 58000 58600 59400 60400 61400)
 STAGE_RUN_NAMES=(
-  spin56500_longlegs_s01_low_yaw_7
-  spin56500_longlegs_s02_low_yaw_10
-  spin56500_longlegs_s03_low_yaw_13
-  spin56500_longlegs_s04_spin_height
-  spin56500_longlegs_s05_flat_combined
-  spin56500_longlegs_s06_mild_terrain
-  spin56500_longlegs_s07_final_consolidation
+  spin_v2_56500_longlegs_s01_yaw_1
+  spin_v2_56500_longlegs_s02_yaw_2
+  spin_v2_56500_longlegs_s03_yaw_3
+  spin_v2_56500_longlegs_s04_yaw_5
+  spin_v2_56500_longlegs_s05_yaw_7
+  spin_v2_56500_longlegs_s06_yaw_10
+  spin_v2_56500_longlegs_s07_yaw_13
+  spin_v2_56500_longlegs_s08_yaw_13_stable
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -47,8 +50,8 @@ Usage:
   bash scripts/spin_curriculum.sh train
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 63500
-  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_59500.pt'
+  bash scripts/spin_curriculum.sh play 58000
+  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_58000.pt'
   bash scripts/spin_curriculum.sh export
 
 The first stage resumes from the stable flat/terrain model_56500.pt. If that
@@ -61,8 +64,8 @@ Useful overrides:
   PYTHON_BIN=python
   WLG_PLAY_NUM_ENVS=20
   WLG_PLAY_HEIGHT=0.16
-  WLG_PLAY_YAW_STEP=13.0
-  WLG_PLAY_LIN_VEL_CMD=0.5
+  WLG_PLAY_INITIAL_YAW=5.0
+  WLG_PLAY_YAW_STEP=5.0
   WLG_EXPORT_OUT=export_onnx/longlegs_spin_final.onnx
 EOF
 }
@@ -216,13 +219,13 @@ apply_common_environment() {
   export WLG_HISTORICAL_DOMAIN_RAND=1
   export WLG_SPAWN_Z=0.12
   export WLG_RECOVERY_MODE=1
-  export WLG_TERRAIN_CURRICULUM=1
-  export WLG_TERRAIN_PROGRESS_FRACTION=0.5
-  export WLG_MAX_INIT_TERRAIN_LEVEL=5
+  export WLG_TERRAIN_CURRICULUM=0
   export WLG_SLOPE_THRESHOLD=0.45
   export WLG_COMMAND_CURRICULUM=0
   export WLG_COMMAND_PROFILE=independent
-  export WLG_COMMAND_RESAMPLING_TIME=3.0
+  # Long holds are closer to joystick operation and avoid repeated +limit to
+  # -limit steps before the policy has time to settle.
+  export WLG_COMMAND_RESAMPLING_TIME=8.0
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
   export WLG_STAIR_UP_FIXED_HEIGHT=-1
   export WLG_HIGHSTAND_ANCHOR_FRACTION=0.0
@@ -233,33 +236,38 @@ apply_common_environment() {
 
   export WLG_LIN_VEL_X_MIN=0.0
   export WLG_LIN_VEL_X_MAX=0.0
-  export WLG_ANG_VEL_YAW_MIN=-7.0
-  export WLG_ANG_VEL_YAW_MAX=7.0
+  export WLG_ANG_VEL_YAW_MIN=-1.0
+  export WLG_ANG_VEL_YAW_MAX=1.0
   export WLG_HEIGHT_MIN=0.16
   export WLG_HEIGHT_MAX=0.16
 
   export WLG_TRACKING_LIN_VEL_SCALE=1.5
   export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=1.0
   export WLG_TRACKING_ANG_VEL_SCALE=2.0
-  export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
+  export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.5
+  # The L1 companion supplies gradient when the Gaussian tracking reward is
+  # effectively zero. A wider per-term clip prevents that gradient from being
+  # flattened at the high-yaw stages.
+  export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.25
+  export WLG_CLIP_SINGLE_REWARD=5.0
   export WLG_BASE_HEIGHT_SCALE=2.0
   export WLG_BASE_HEIGHT_ENHANCE_SCALE=1.5
   export WLG_NOMINAL_STATE_SCALE=-1.0
   export WLG_LIN_VEL_Z_SCALE=-0.1
-  export WLG_ANG_VEL_XY_SCALE=-0.07
-  export WLG_ORIENTATION_SCALE=-12.0
+  export WLG_ANG_VEL_XY_SCALE=-0.05
+  export WLG_ORIENTATION_SCALE=-3.0
   export WLG_TORQUES_SCALE=-0.0001
   export WLG_COLLISION_SCALE=-1.0
   export WLG_WHEEL_SUPPORT_SCALE=0.25
   export WLG_DOF_POS_LIMITS_SCALE=-1.0
   export WLG_DOF_VEL_SCALE=-0.0001
   export WLG_DOF_ACC_SCALE=-5e-7
-  export WLG_ACTION_RATE_SCALE=-0.03
-  export WLG_ACTION_SMOOTH_SCALE=-0.04
-  # The resumed 56500 policy is already stable. Keep exploration moderate so
-  # the first high-yaw stages do not immediately erase that quiet equilibrium.
+  export WLG_ACTION_RATE_SCALE=-0.015
+  export WLG_ACTION_SMOOTH_SCALE=-0.02
+  # Start with modest exploration; the resumed policy already has a stable
+  # wheel-balance solution and only needs to acquire yaw authority.
   export WLG_INIT_NOISE_STD=0.30
-  export WLG_ENTROPY_COEF=0.002
+  export WLG_ENTROPY_COEF=0.0015
   export WLG_RECOVERY_POSE_SCALE=0.0
 
   export WLG_HIGH_STAND_LIN_VEL_SCALE=0.0
@@ -270,88 +278,89 @@ apply_common_environment() {
 
   export WLG_SPIN_LOW_HEIGHT_MIN=0.16
   export WLG_SPIN_LOW_HEIGHT_MAX=0.20
-  export WLG_SPIN_HIGH_YAW_MIN=7.0
+  export WLG_SPIN_HIGH_YAW_MIN=1.0
   export WLG_SPIN_HIGH_YAW_LIN_VEL_MAX=0.0
   export WLG_SPIN_MOVING_LIN_VEL_MAX=0.0
-  export WLG_SPIN_MOVING_YAW_MAX=7.0
+  export WLG_SPIN_MOVING_YAW_MAX=1.0
   export WLG_SPIN_MOVING_HEIGHT_MAX=0.28
   export WLG_SPIN_TERRAIN_HEIGHT_MAX=0.26
   export WLG_MIXED_TERRAIN_LIN_VEL_MAX=0.0
   export WLG_MIXED_TERRAIN_YAW_MAX=0.0
 
-  # Extra stability is applied only when vx command is exactly zero. Moving
-  # turns use the normal, weaker penalties and may lean as needed.
-  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-3.0
-  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.80
-  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-12.0
-  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.02
-  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.03
+  # Keep these deliberately mild while yaw is being acquired. They are
+  # tightened stage by stage after the robot demonstrates actual rotation.
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.5
+  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.15
+  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-1.5
+  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.005
+  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.008
 }
 
 apply_stage_environment() {
   local stage_index="$1"
   apply_common_environment
   export WLG_MESH_TYPE=plane
-  export WLG_TERRAIN_PROPORTIONS=0.55,0.25,0.20,0.0,0.0,0.0
+  export WLG_TERRAIN_PROPORTIONS=1.0,0.0,0.0,0.0,0.0,0.0
 
   case "${STAGE_KEYS[$stage_index]}" in
-    low_yaw_7)
+    yaw_1)
       ;;
-    low_yaw_10)
+    yaw_2)
+      export WLG_ANG_VEL_YAW_MIN=-2.0
+      export WLG_ANG_VEL_YAW_MAX=2.0
+      export WLG_SPIN_MOVING_YAW_MAX=2.0
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-2.0
+      ;;
+    yaw_3)
+      export WLG_ANG_VEL_YAW_MIN=-3.0
+      export WLG_ANG_VEL_YAW_MAX=3.0
+      export WLG_SPIN_MOVING_YAW_MAX=3.0
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-2.5
+      ;;
+    yaw_5)
+      export WLG_ANG_VEL_YAW_MIN=-5.0
+      export WLG_ANG_VEL_YAW_MAX=5.0
+      export WLG_SPIN_MOVING_YAW_MAX=5.0
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.75
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.0
+      ;;
+    yaw_7)
+      export WLG_ANG_VEL_YAW_MIN=-7.0
+      export WLG_ANG_VEL_YAW_MAX=7.0
+      export WLG_SPIN_MOVING_YAW_MAX=7.0
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.0
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.25
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
+      ;;
+    yaw_10)
       export WLG_ANG_VEL_YAW_MIN=-10.0
       export WLG_ANG_VEL_YAW_MAX=10.0
       export WLG_SPIN_MOVING_YAW_MAX=10.0
-      export WLG_ENTROPY_COEF=0.0025
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.25
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.30
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.5
       ;;
-    low_yaw_13)
+    yaw_13)
       export WLG_ANG_VEL_YAW_MIN=-13.0
       export WLG_ANG_VEL_YAW_MAX=13.0
       export WLG_SPIN_MOVING_YAW_MAX=13.0
-      export WLG_ENTROPY_COEF=0.003
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.5
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.35
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-5.0
+      export WLG_ENTROPY_COEF=0.0012
       ;;
-    spin_height)
-      export WLG_COMMAND_PROFILE=spin_mixed
+    yaw_13_stable)
       export WLG_ANG_VEL_YAW_MIN=-13.0
       export WLG_ANG_VEL_YAW_MAX=13.0
-      export WLG_HEIGHT_MAX=0.33
-      export WLG_SPIN_MOVING_YAW_MAX=10.0
-      export WLG_ENTROPY_COEF=0.003
-      ;;
-    flat_combined)
-      export WLG_COMMAND_PROFILE=spin_mixed
-      export WLG_LIN_VEL_X_MIN=-2.0
-      export WLG_LIN_VEL_X_MAX=2.0
-      export WLG_ANG_VEL_YAW_MIN=-13.0
-      export WLG_ANG_VEL_YAW_MAX=13.0
-      export WLG_HEIGHT_MAX=0.33
-      export WLG_SPIN_HIGH_YAW_LIN_VEL_MAX=0.5
-      export WLG_SPIN_MOVING_LIN_VEL_MAX=1.5
-      export WLG_SPIN_MOVING_YAW_MAX=8.0
-      export WLG_ENTROPY_COEF=0.003
-      ;;
-    mild_terrain|final_consolidation)
-      export WLG_MESH_TYPE=trimesh
-      export WLG_COMMAND_PROFILE=spin_mixed
-      export WLG_LIN_VEL_X_MIN=-2.0
-      export WLG_LIN_VEL_X_MAX=2.0
-      export WLG_ANG_VEL_YAW_MIN=-13.0
-      export WLG_ANG_VEL_YAW_MAX=13.0
-      export WLG_HEIGHT_MAX=0.33
-      export WLG_SPIN_HIGH_YAW_LIN_VEL_MAX=0.5
-      export WLG_SPIN_MOVING_LIN_VEL_MAX=1.5
-      export WLG_SPIN_MOVING_YAW_MAX=8.0
-      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.0
-      export WLG_MIXED_TERRAIN_YAW_MAX=4.0
-      export WLG_SPIN_TERRAIN_HEIGHT_MAX=0.26
-      export WLG_MAX_INIT_TERRAIN_LEVEL=4
-      export WLG_ENTROPY_COEF=0.0025
-      if [[ "${STAGE_KEYS[$stage_index]}" == final_consolidation ]]; then
-        export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
-        export WLG_MIXED_TERRAIN_YAW_MAX=6.0
-        export WLG_SPIN_TERRAIN_HEIGHT_MAX=0.28
-        export WLG_MAX_INIT_TERRAIN_LEVEL=5
-        export WLG_ENTROPY_COEF=0.0015
-      fi
+      export WLG_SPIN_MOVING_YAW_MAX=13.0
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.18
+      export WLG_ORIENTATION_SCALE=-6.0
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-2.0
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.50
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-6.0
+      export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.015
+      export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.02
+      export WLG_ENTROPY_COEF=0.0008
       ;;
     *)
       echo "Unknown SPIN stage: ${STAGE_KEYS[$stage_index]}" >&2
@@ -368,9 +377,9 @@ print_stage_config() {
     "$WLG_LIN_VEL_X_MIN" "$WLG_LIN_VEL_X_MAX" \
     "$WLG_ANG_VEL_YAW_MIN" "$WLG_ANG_VEL_YAW_MAX" \
     "$WLG_HEIGHT_MIN" "$WLG_HEIGHT_MAX"
-  printf '  moving_spin: vx=±%s, yaw=±%s; terrain: vx=±%s, yaw=±%s\n' \
-    "$WLG_SPIN_MOVING_LIN_VEL_MAX" "$WLG_SPIN_MOVING_YAW_MAX" \
-    "$WLG_MIXED_TERRAIN_LIN_VEL_MAX" "$WLG_MIXED_TERRAIN_YAW_MAX"
+  printf '  yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
+    "$WLG_TRACKING_ANG_VEL_L1_SCALE" "$WLG_CLIP_SINGLE_REWARD" \
+    "$WLG_COMMAND_RESAMPLING_TIME"
   printf '  target_checkpoint=%s\n' "${STAGE_TARGETS[$stage_index]}"
 }
 

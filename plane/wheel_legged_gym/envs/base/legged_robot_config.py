@@ -386,6 +386,12 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel_enhance = _env_float(
                 "WLG_TRACKING_ANG_VEL_ENHANCE_SCALE", 1.0
             )
+            # Optional non-saturating yaw error.  The Gaussian terms above are
+            # precise close to the target but have almost no gradient when a
+            # new SPIN stage starts far from its requested angular velocity.
+            tracking_ang_vel_l1 = _env_float(
+                "WLG_TRACKING_ANG_VEL_L1_SCALE", 0.0
+            )
 
             # theta0_equ_0 = 0.4
             # Re-enable the non-vanishing L1 height penalty while extending the
@@ -467,7 +473,9 @@ class LeggedRobotCfg(BaseConfig):
             dof_pos_limits = _env_float("WLG_DOF_POS_LIMITS_SCALE", -5.0)
 
         only_positive_rewards = False  # if true negative total rewards are clipped at zero (avoids early termination problems)
-        clip_single_reward = 1
+        # Curricula may raise this for deliberately non-saturating error terms.
+        # The default preserves the historical behavior of every other script.
+        clip_single_reward = _env_float("WLG_CLIP_SINGLE_REWARD", 1.0)
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
         soft_dof_pos_limit = (
             0.97  # percentage of urdf limits, values above this limit are penalized

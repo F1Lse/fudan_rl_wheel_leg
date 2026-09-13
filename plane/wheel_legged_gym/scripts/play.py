@@ -22,8 +22,8 @@ except ImportError:
 # --------------------
 # Global command state
 # --------------------
-cmd_x = 0.0
-ang_vel = 0.0
+cmd_x = float(os.getenv("WLG_PLAY_INITIAL_LIN_VEL", "0.0"))
+ang_vel = float(os.getenv("WLG_PLAY_INITIAL_YAW", "0.0"))
 cmd_height = float(os.getenv("WLG_PLAY_HEIGHT", "0.20"))
 running = True
 turn_left_pressed = False
@@ -217,6 +217,7 @@ def play(args):
     print("c      : height down")
     print("q/ESC  : quit")
     print("camera : fixed overview")
+    print(f"initial command: vx={cmd_x:.2f}, yaw={ang_vel:.2f}, h={cmd_height:.2f}")
     print("=============================================\n")
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)

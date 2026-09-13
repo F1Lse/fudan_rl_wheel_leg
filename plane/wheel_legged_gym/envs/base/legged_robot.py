@@ -171,6 +171,10 @@ class LeggedRobot(BaseTask):
         )
         tilt = torch.acos(torch.clamp(-self.projected_gravity[:, 2], -1.0, 1.0))
         stationary_spin = (torch.abs(self.commands[:, 0]) < 1.0e-6).float()
+        commanded_spin = stationary_spin * (
+            torch.abs(self.commands[:, 1]) > 0.25
+        ).float()
+        yaw_abs_error = torch.abs(self.commands[:, 1] - self.base_ang_vel[:, 2])
         self.episode_max_abs_pitch = torch.maximum(
             self.episode_max_abs_pitch, abs_pitch
         )
@@ -178,6 +182,18 @@ class LeggedRobot(BaseTask):
         self.episode_stationary_tilt_sum += tilt * stationary_spin
         self.episode_stationary_tilt_sq_sum += torch.square(tilt) * stationary_spin
         self.episode_stationary_tilt_steps += stationary_spin
+        self.episode_spin_cmd_abs_yaw_sum += (
+            torch.abs(self.commands[:, 1]) * commanded_spin
+        )
+        self.episode_spin_real_abs_yaw_sum += (
+            torch.abs(self.base_ang_vel[:, 2]) * commanded_spin
+        )
+        self.episode_spin_yaw_abs_error_sum += yaw_abs_error * commanded_spin
+        self.episode_spin_direction_ok_sum += (
+            (self.commands[:, 1] * self.base_ang_vel[:, 2] > 0.0).float()
+            * commanded_spin
+        )
+        self.episode_spin_steps += commanded_spin
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
         theta1 = torch.cat(
@@ -301,6 +317,19 @@ class LeggedRobot(BaseTask):
             * 180.0
             / math.pi
         )
+        spin_steps = torch.clamp(torch.sum(self.episode_spin_steps[env_ids]), min=1.0)
+        episode_mean_spin_cmd_abs_yaw = (
+            torch.sum(self.episode_spin_cmd_abs_yaw_sum[env_ids]) / spin_steps
+        )
+        episode_mean_spin_real_abs_yaw = (
+            torch.sum(self.episode_spin_real_abs_yaw_sum[env_ids]) / spin_steps
+        )
+        episode_mean_spin_yaw_abs_error = (
+            torch.sum(self.episode_spin_yaw_abs_error_sum[env_ids]) / spin_steps
+        )
+        episode_spin_direction_accuracy = (
+            torch.sum(self.episode_spin_direction_ok_sum[env_ids]) / spin_steps
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -331,6 +360,11 @@ class LeggedRobot(BaseTask):
         self.episode_stationary_tilt_sum[env_ids] = 0.0
         self.episode_stationary_tilt_sq_sum[env_ids] = 0.0
         self.episode_stationary_tilt_steps[env_ids] = 0.0
+        self.episode_spin_cmd_abs_yaw_sum[env_ids] = 0.0
+        self.episode_spin_real_abs_yaw_sum[env_ids] = 0.0
+        self.episode_spin_yaw_abs_error_sum[env_ids] = 0.0
+        self.episode_spin_direction_ok_sum[env_ids] = 0.0
+        self.episode_spin_steps[env_ids] = 0.0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -351,6 +385,18 @@ class LeggedRobot(BaseTask):
         )
         self.extras["episode"]["rms_stationary_tilt_deg"] = (
             episode_rms_stationary_tilt_deg
+        )
+        self.extras["episode"]["mean_spin_cmd_abs_yaw"] = (
+            episode_mean_spin_cmd_abs_yaw
+        )
+        self.extras["episode"]["mean_spin_real_abs_yaw"] = (
+            episode_mean_spin_real_abs_yaw
+        )
+        self.extras["episode"]["mean_spin_yaw_abs_error"] = (
+            episode_mean_spin_yaw_abs_error
+        )
+        self.extras["episode"]["spin_direction_accuracy"] = (
+            episode_spin_direction_accuracy
         )
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
@@ -1581,6 +1627,21 @@ class LeggedRobot(BaseTask):
         self.episode_stationary_tilt_steps = torch.zeros_like(
             self.episode_stationary_tilt_sum
         )
+        self.episode_spin_cmd_abs_yaw_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_real_abs_yaw_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_yaw_abs_error_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_direction_ok_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_steps = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -2477,6 +2538,10 @@ class LeggedRobot(BaseTask):
         # Tracking of angular velocity commands (x axes)
         ang_vel_error = torch.square(self.commands[:, 1] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error / self.cfg.rewards.tracking_sigma / 10) - 1
+
+    def _reward_tracking_ang_vel_l1(self):
+        """Yaw error with useful gradient even far outside the Gaussian basin."""
+        return torch.abs(self.commands[:, 1] - self.base_ang_vel[:, 2])
 
     def _reward_theta0_equ_0(self):    
         left_theta0_error = torch.square(self.theta0[:, 0])
