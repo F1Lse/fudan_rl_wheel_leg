@@ -394,6 +394,12 @@ class LeggedRobotCfg(BaseConfig):
             tracking_lin_vel_enhance = _env_float(
                 "WLG_TRACKING_LIN_VEL_ENHANCE_SCALE", 1.0
             )
+            # Optional non-saturating companion for focused obstacle stages.
+            # It prevents a stopped robot with a large command error from
+            # falling outside the useful gradient of the Gaussian terms.
+            tracking_lin_vel_l1 = _env_float(
+                "WLG_TRACKING_LIN_VEL_L1_SCALE", 0.0
+            )
             tracking_ang_vel = _env_float("WLG_TRACKING_ANG_VEL_SCALE", 1.0)
             tracking_ang_vel_enhance = _env_float(
                 "WLG_TRACKING_ANG_VEL_ENHANCE_SCALE", 1.0
@@ -476,6 +482,11 @@ class LeggedRobotCfg(BaseConfig):
             terrain_pitch_rate = _env_float(
                 "WLG_TERRAIN_PITCH_RATE_SCALE", 0.0
             )
+            # Teacher-only shaping for reactive curb traversal. Contact forces
+            # choose when the reward is active but are not added to actor obs.
+            terrain_impact_tuck = _env_float(
+                "WLG_TERRAIN_IMPACT_TUCK_SCALE", 0.0
+            )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
@@ -500,6 +511,24 @@ class LeggedRobotCfg(BaseConfig):
         )
         terrain_pitch_soft_limit_deg = _env_float(
             "WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG", 20.0
+        )
+        terrain_impact_horizontal_force = _env_float(
+            "WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE", 15.0
+        )
+        terrain_impact_force_ratio = _env_float(
+            "WLG_TERRAIN_IMPACT_FORCE_RATIO", 0.35
+        )
+        terrain_impact_speed_ratio = _env_float(
+            "WLG_TERRAIN_IMPACT_SPEED_RATIO", 0.75
+        )
+        terrain_impact_tuck_hold_s = _env_float(
+            "WLG_TERRAIN_IMPACT_TUCK_HOLD_S", 0.30
+        )
+        terrain_impact_tuck_sigma = _env_float(
+            "WLG_TERRAIN_IMPACT_TUCK_SIGMA", 0.20
+        )
+        terrain_impact_tuck_joint_target = _env_float_list(
+            "WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET", [0.0, 1.0, 0.0, -1.0]
         )
         max_contact_force = 100.0  # forces above this value are penalized
 

@@ -330,6 +330,20 @@ class LeggedRobot(BaseTask):
         episode_spin_direction_accuracy = (
             torch.sum(self.episode_spin_direction_ok_sum[env_ids]) / spin_steps
         )
+        tuck_active_steps = torch.clamp(
+            torch.sum(self.episode_terrain_tuck_active_steps[env_ids]), min=1.0
+        )
+        episode_mean_terrain_tuck_error = (
+            torch.sum(self.episode_terrain_tuck_error_sum[env_ids])
+            / tuck_active_steps
+        )
+        total_episode_steps = torch.clamp(
+            torch.sum(self.episode_length_buf[env_ids].float()), min=1.0
+        )
+        episode_terrain_tuck_active_fraction = (
+            torch.sum(self.episode_terrain_tuck_active_steps[env_ids])
+            / total_episode_steps
+        )
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -365,6 +379,9 @@ class LeggedRobot(BaseTask):
         self.episode_spin_yaw_abs_error_sum[env_ids] = 0.0
         self.episode_spin_direction_ok_sum[env_ids] = 0.0
         self.episode_spin_steps[env_ids] = 0.0
+        self.episode_terrain_tuck_active_steps[env_ids] = 0.0
+        self.episode_terrain_tuck_error_sum[env_ids] = 0.0
+        self.terrain_impact_tuck_timer[env_ids] = 0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -397,6 +414,12 @@ class LeggedRobot(BaseTask):
         )
         self.extras["episode"]["spin_direction_accuracy"] = (
             episode_spin_direction_accuracy
+        )
+        self.extras["episode"]["terrain_tuck_active_fraction"] = (
+            episode_terrain_tuck_active_fraction
+        )
+        self.extras["episode"]["mean_terrain_tuck_error"] = (
+            episode_mean_terrain_tuck_error
         )
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
@@ -1684,6 +1707,18 @@ class LeggedRobot(BaseTask):
         self.episode_spin_steps = torch.zeros_like(
             self.episode_stationary_tilt_sum
         )
+        self.episode_terrain_tuck_active_steps = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_terrain_tuck_error_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.terrain_impact_tuck_timer = torch.zeros(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
+            requires_grad=False,
+        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -1747,6 +1782,11 @@ class LeggedRobot(BaseTask):
                     )
         self.recovery_joint_target = to_torch(
             self.cfg.rewards.recovery_joint_target,
+            device=self.device,
+            requires_grad=False,
+        ).unsqueeze(0)
+        self.terrain_impact_tuck_joint_target = to_torch(
+            self.cfg.rewards.terrain_impact_tuck_joint_target,
             device=self.device,
             requires_grad=False,
         ).unsqueeze(0)
@@ -2364,6 +2404,53 @@ class LeggedRobot(BaseTask):
             self.base_ang_vel[:, 1]
         )
 
+    def _reward_terrain_impact_tuck(self):
+        """Reward a brief tuck after the wheels hit a curb and lose progress.
+
+        Net contact force is deliberately used only to gate this teacher reward.
+        The policy observation stays unchanged, so the actor must infer the
+        event from wheel/joint velocity history and IMU motion at deployment.
+        """
+        wheel_forces = self.contact_forces[:, self.feet_indices, :]
+        horizontal_force = torch.norm(wheel_forces[:, :, :2], dim=2)
+        vertical_force = torch.abs(wheel_forces[:, :, 2])
+        force_ratio = horizontal_force / (vertical_force + 1.0)
+        wheel_impact = torch.any(
+            (horizontal_force > self.cfg.rewards.terrain_impact_horizontal_force)
+            & (force_ratio > self.cfg.rewards.terrain_impact_force_ratio),
+            dim=1,
+        )
+        command_speed = torch.abs(self.commands[:, 0])
+        speed_stalled = torch.abs(self.base_lin_vel[:, 0]) < (
+            self.cfg.rewards.terrain_impact_speed_ratio * command_speed
+        )
+        trigger = (
+            self._terrain_pitch_focus_mask().bool()
+            & (command_speed > 0.30)
+            & speed_stalled
+            & wheel_impact
+        )
+
+        hold_steps = max(
+            1,
+            int(round(self.cfg.rewards.terrain_impact_tuck_hold_s / self.dt)),
+        )
+        self.terrain_impact_tuck_timer = torch.where(
+            trigger,
+            torch.full_like(self.terrain_impact_tuck_timer, hold_steps),
+            torch.clamp(self.terrain_impact_tuck_timer - 1, min=0),
+        )
+        active = (self.terrain_impact_tuck_timer > 0).float()
+        leg_pos = self.dof_pos[:, [0, 1, 3, 4]]
+        tuck_error = torch.mean(
+            torch.square(leg_pos - self.terrain_impact_tuck_joint_target), dim=1
+        )
+        self.episode_terrain_tuck_active_steps += active
+        self.episode_terrain_tuck_error_sum += tuck_error * active
+        return active * torch.exp(
+            -tuck_error / self.cfg.rewards.terrain_impact_tuck_sigma
+        )
+
     def _reward_base_height(self):
         # Penalize base height away from target
         # print(self.commands[0, 2], self.base_height[0])
@@ -2570,6 +2657,10 @@ class LeggedRobot(BaseTask):
         # Tracking of linear velocity commands (x axes)
         lin_vel_error = torch.square(self.commands[:, 0] - self.base_lin_vel[:, 0])
         return torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma / 10) - 1
+
+    def _reward_tracking_lin_vel_l1(self):
+        """Linear-speed error with gradient outside the Gaussian basin."""
+        return torch.abs(self.commands[:, 0] - self.base_lin_vel[:, 0])
 
     def _reward_tracking_ang_vel(self):
         # Tracking of angular velocity commands (yaw)
