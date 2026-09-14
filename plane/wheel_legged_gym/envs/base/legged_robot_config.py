@@ -559,6 +559,9 @@ class LeggedRobotCfg(BaseConfig):
         terrain_impact_tuck_cooldown_s = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S", 0.80
         )
+        terrain_impact_rearm_clear_s = _env_float(
+            "WLG_TERRAIN_IMPACT_REARM_CLEAR_S", 0.05
+        )
         terrain_impact_tuck_sigma = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_SIGMA", 0.20
         )

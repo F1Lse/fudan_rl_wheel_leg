@@ -415,6 +415,7 @@ class LeggedRobot(BaseTask):
         self.terrain_impact_tuck_timer[env_ids] = 0
         self.terrain_impact_extend_timer[env_ids] = 0
         self.terrain_impact_tuck_cooldown_timer[env_ids] = 0
+        self.terrain_impact_clear_steps[env_ids] = 0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -1819,6 +1820,9 @@ class LeggedRobot(BaseTask):
         self.terrain_impact_extend_timer = torch.zeros_like(
             self.terrain_impact_tuck_timer
         )
+        self.terrain_impact_clear_steps = torch.zeros_like(
+            self.terrain_impact_tuck_timer
+        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -2536,6 +2540,28 @@ class LeggedRobot(BaseTask):
             & (force_ratio > self.cfg.rewards.terrain_impact_force_ratio),
             dim=1,
         )
+        rearm_clear_steps = max(
+            1,
+            int(
+                round(
+                    self.cfg.rewards.terrain_impact_rearm_clear_s / self.dt
+                )
+            ),
+        )
+        # Trigger only on a newly established impact.  Requiring a short,
+        # continuous clear interval prevents one curb contact from retriggering
+        # every time its noisy force signal crosses the threshold.
+        impact_onset = wheel_impact & (
+            self.terrain_impact_clear_steps >= rearm_clear_steps
+        )
+        self.terrain_impact_clear_steps = torch.where(
+            wheel_impact,
+            torch.zeros_like(self.terrain_impact_clear_steps),
+            torch.clamp(
+                self.terrain_impact_clear_steps + 1,
+                max=rearm_clear_steps,
+            ),
+        )
         command_speed = torch.abs(self.commands[:, 0])
         speed_stalled = torch.abs(self.base_lin_vel[:, 0]) < (
             self.cfg.rewards.terrain_impact_speed_ratio * command_speed
@@ -2544,7 +2570,7 @@ class LeggedRobot(BaseTask):
             self._terrain_pitch_focus_mask().bool()
             & (command_speed > 0.30)
             & speed_stalled
-            & wheel_impact
+            & impact_onset
         )
 
         hold_steps = max(
