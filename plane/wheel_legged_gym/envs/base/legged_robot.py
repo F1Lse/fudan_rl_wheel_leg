@@ -415,7 +415,6 @@ class LeggedRobot(BaseTask):
         self.terrain_impact_tuck_timer[env_ids] = 0
         self.terrain_impact_extend_timer[env_ids] = 0
         self.terrain_impact_tuck_cooldown_timer[env_ids] = 0
-        self.terrain_impact_clear_steps[env_ids] = 0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
@@ -1820,9 +1819,6 @@ class LeggedRobot(BaseTask):
         self.terrain_impact_extend_timer = torch.zeros_like(
             self.terrain_impact_tuck_timer
         )
-        self.terrain_impact_clear_steps = torch.zeros_like(
-            self.terrain_impact_tuck_timer
-        )
         self.action_delay_idx = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -2540,28 +2536,6 @@ class LeggedRobot(BaseTask):
             & (force_ratio > self.cfg.rewards.terrain_impact_force_ratio),
             dim=1,
         )
-        rearm_clear_steps = max(
-            1,
-            int(
-                round(
-                    self.cfg.rewards.terrain_impact_rearm_clear_s / self.dt
-                )
-            ),
-        )
-        # Trigger only on a newly established impact.  Requiring a short,
-        # continuous clear interval prevents one curb contact from retriggering
-        # every time its noisy force signal crosses the threshold.
-        impact_onset = wheel_impact & (
-            self.terrain_impact_clear_steps >= rearm_clear_steps
-        )
-        self.terrain_impact_clear_steps = torch.where(
-            wheel_impact,
-            torch.zeros_like(self.terrain_impact_clear_steps),
-            torch.clamp(
-                self.terrain_impact_clear_steps + 1,
-                max=rearm_clear_steps,
-            ),
-        )
         command_speed = torch.abs(self.commands[:, 0])
         speed_stalled = torch.abs(self.base_lin_vel[:, 0]) < (
             self.cfg.rewards.terrain_impact_speed_ratio * command_speed
@@ -2570,7 +2544,7 @@ class LeggedRobot(BaseTask):
             self._terrain_pitch_focus_mask().bool()
             & (command_speed > 0.30)
             & speed_stalled
-            & impact_onset
+            & wheel_impact
         )
 
         hold_steps = max(
@@ -2695,15 +2669,21 @@ class LeggedRobot(BaseTask):
         return active * speed_gain * torch.mean(toward_target_speed, dim=1)
 
     def _reward_terrain_impact_drive(self):
-        """Keep driving in the commanded direction throughout the reflex."""
+        """Maintain safe minimum progress without demanding full impact speed."""
         active = torch.maximum(
             (self.terrain_impact_tuck_timer > 0).float(),
             (self.terrain_impact_extend_timer > 0).float(),
         )
         command_speed = torch.abs(self.commands[:, 0])
         directional_speed = torch.sign(self.commands[:, 0]) * self.base_lin_vel[:, 0]
+        target_ratio = max(
+            self.cfg.rewards.terrain_impact_drive_target_ratio,
+            0.05,
+        )
         normalized_progress = torch.clamp(
-            directional_speed / (command_speed + 0.10), min=0.0, max=1.0
+            directional_speed / (target_ratio * command_speed + 0.10),
+            min=0.0,
+            max=1.0,
         )
         return active * normalized_progress
 
@@ -2954,16 +2934,39 @@ class LeggedRobot(BaseTask):
     def _reward_tracking_lin_vel(self):
         # Tracking of linear velocity commands (x axes)
         lin_vel_error = torch.square(self.commands[:, 0] - self.base_lin_vel[:, 0])
-        return torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
+        return (
+            torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
+            * self._terrain_impact_speed_tracking_multiplier()
+        )
 
     def _reward_tracking_lin_vel_enhance(self):
         # Tracking of linear velocity commands (x axes)
         lin_vel_error = torch.square(self.commands[:, 0] - self.base_lin_vel[:, 0])
-        return torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma / 10) - 1
+        return (
+            torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma / 10) - 1
+        ) * self._terrain_impact_speed_tracking_multiplier()
 
     def _reward_tracking_lin_vel_l1(self):
         """Linear-speed error with gradient outside the Gaussian basin."""
-        return torch.abs(self.commands[:, 0] - self.base_lin_vel[:, 0])
+        return (
+            torch.abs(self.commands[:, 0] - self.base_lin_vel[:, 0])
+            * self._terrain_impact_speed_tracking_multiplier()
+        )
+
+    def _terrain_impact_speed_tracking_multiplier(self):
+        """Relax speed objectives only while the impact reflex is active."""
+        reflex_active = torch.maximum(
+            (self.terrain_impact_tuck_timer > 0).float(),
+            (self.terrain_impact_extend_timer > 0).float(),
+        )
+        impact_multiplier = min(
+            max(
+                self.cfg.rewards.terrain_impact_speed_tracking_multiplier,
+                0.0,
+            ),
+            1.0,
+        )
+        return 1.0 - reflex_active * (1.0 - impact_multiplier)
 
     def _reward_tracking_ang_vel(self):
         # Tracking of angular velocity commands (yaw)

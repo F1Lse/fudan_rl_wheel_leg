@@ -559,14 +559,20 @@ class LeggedRobotCfg(BaseConfig):
         terrain_impact_tuck_cooldown_s = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_COOLDOWN_S", 0.80
         )
-        terrain_impact_rearm_clear_s = _env_float(
-            "WLG_TERRAIN_IMPACT_REARM_CLEAR_S", 0.05
-        )
         terrain_impact_tuck_sigma = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_SIGMA", 0.20
         )
         terrain_impact_tuck_speed_gain = _env_float(
             "WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN", 0.0
+        )
+        # During the short teacher-triggered tuck/extend reflex, curricula can
+        # relax global speed tracking and ask only for a safe minimum forward
+        # progress. Defaults preserve all historical policies and scripts.
+        terrain_impact_speed_tracking_multiplier = _env_float(
+            "WLG_TERRAIN_IMPACT_SPEED_TRACKING_MULTIPLIER", 1.0
+        )
+        terrain_impact_drive_target_ratio = _env_float(
+            "WLG_TERRAIN_IMPACT_DRIVE_TARGET_RATIO", 1.0
         )
         terrain_impact_tuck_joint_target = _env_float_list(
             "WLG_TERRAIN_IMPACT_TUCK_JOINT_TARGET", [0.0, 1.0, 0.0, -1.0]
