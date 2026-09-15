@@ -190,7 +190,9 @@ class LeggedRobotCfg(BaseConfig):
             "WLG_ADVANCED_MAX_ANG_VEL_CURRICULUM", 6.0
         )
         curriculum_threshold = 0.7
-        num_commands = 3  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
+        # Actor command order: body-frame vx, yaw rate, body height.  One extra
+        # internal slot is allocated for heading mode; there is no vy command.
+        num_commands = 3
         resampling_time = _env_float(
             "WLG_COMMAND_RESAMPLING_TIME", 5.0
         )  # time before command are changed[s]
@@ -468,6 +470,12 @@ class LeggedRobotCfg(BaseConfig):
             spin_stationary_lin_vel = _env_float(
                 "WLG_SPIN_STATIONARY_LIN_VEL_SCALE", 0.0
             )
+            # Keep an in-place spin close to the world-frame XY point where the
+            # zero-vx command began.  This closes the loophole where a small
+            # instantaneous velocity can accumulate into a large circular path.
+            spin_stationary_position = _env_float(
+                "WLG_SPIN_STATIONARY_POSITION_SCALE", 0.0
+            )
             spin_stationary_ang_vel_xy = _env_float(
                 "WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE", 0.0
             )
@@ -479,6 +487,15 @@ class LeggedRobotCfg(BaseConfig):
             )
             spin_stationary_action_smooth = _env_float(
                 "WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE", 0.0
+            )
+            # A two-wheel chassis has no commanded lateral DOF.  During a
+            # moving turn, penalize uncommanded body-y velocity and motion in
+            # the opposite direction to the requested body-x velocity.
+            spin_moving_lateral_vel = _env_float(
+                "WLG_SPIN_MOVING_LATERAL_VEL_SCALE", 0.0
+            )
+            spin_moving_wrong_way = _env_float(
+                "WLG_SPIN_MOVING_WRONG_WAY_SCALE", 0.0
             )
 
             # Masked to the standard pyramid climb and measured curb/drop
@@ -532,6 +549,12 @@ class LeggedRobotCfg(BaseConfig):
         # The default preserves the historical behavior of every other script.
         clip_single_reward = _env_float("WLG_CLIP_SINGLE_REWARD", 1.0)
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
+        spin_stationary_position_deadband = _env_float(
+            "WLG_SPIN_STATIONARY_POSITION_DEADBAND", 0.025
+        )
+        spin_moving_command_threshold = _env_float(
+            "WLG_SPIN_MOVING_COMMAND_THRESHOLD", 0.05
+        )
         soft_dof_pos_limit = (
             0.97  # percentage of urdf limits, values above this limit are penalized
         )

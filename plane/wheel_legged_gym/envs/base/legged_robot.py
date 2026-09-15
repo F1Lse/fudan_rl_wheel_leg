@@ -166,6 +166,16 @@ class LeggedRobot(BaseTask):
         self.projected_gravity[:] = quat_rotate_inverse(
             self.base_quat, self.gravity_vec
         )
+        # Manual commands (play/deployment-like operation) can change between
+        # simulator resampling ticks.  Anchor the current world XY position on
+        # the transition from moving to zero-vx operation, then retain it for
+        # the complete in-place spin.
+        stationary_now = torch.abs(self.commands[:, 0]) < 1.0e-6
+        entering_stationary = stationary_now & ~self.spin_was_stationary
+        self.spin_position_anchor[entering_stationary] = self.base_position[
+            entering_stationary, :2
+        ]
+        self.spin_was_stationary[:] = stationary_now
         abs_pitch = torch.asin(
             torch.clamp(torch.abs(self.projected_gravity[:, 0]), 0.0, 1.0)
         )
@@ -192,6 +202,16 @@ class LeggedRobot(BaseTask):
         self.episode_spin_direction_ok_sum += (
             (self.commands[:, 1] * self.base_ang_vel[:, 2] > 0.0).float()
             * commanded_spin
+        )
+        spin_position_drift = torch.norm(
+            self.base_position[:, :2] - self.spin_position_anchor, dim=1
+        )
+        self.episode_spin_position_drift_sum += (
+            spin_position_drift * commanded_spin
+        )
+        self.episode_spin_position_drift_max = torch.maximum(
+            self.episode_spin_position_drift_max,
+            spin_position_drift * commanded_spin,
         )
         self.episode_spin_steps += commanded_spin
         self._update_terrain_impact_tuck_state()
@@ -331,6 +351,12 @@ class LeggedRobot(BaseTask):
         episode_spin_direction_accuracy = (
             torch.sum(self.episode_spin_direction_ok_sum[env_ids]) / spin_steps
         )
+        episode_mean_spin_position_drift_m = (
+            torch.sum(self.episode_spin_position_drift_sum[env_ids]) / spin_steps
+        )
+        episode_max_spin_position_drift_m = torch.mean(
+            self.episode_spin_position_drift_max[env_ids]
+        )
         tuck_active_steps = torch.clamp(
             torch.sum(self.episode_terrain_tuck_active_steps[env_ids]), min=1.0
         )
@@ -386,6 +412,10 @@ class LeggedRobot(BaseTask):
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
 
+        # A reset starts a new coordinate frame for the in-place-spin target.
+        self.spin_position_anchor[env_ids] = self.root_states[env_ids, :2]
+        self.spin_was_stationary[env_ids] = False
+
         self._resample_commands(env_ids)
 
         # reset buffers
@@ -404,6 +434,8 @@ class LeggedRobot(BaseTask):
         self.episode_spin_real_abs_yaw_sum[env_ids] = 0.0
         self.episode_spin_yaw_abs_error_sum[env_ids] = 0.0
         self.episode_spin_direction_ok_sum[env_ids] = 0.0
+        self.episode_spin_position_drift_sum[env_ids] = 0.0
+        self.episode_spin_position_drift_max[env_ids] = 0.0
         self.episode_spin_steps[env_ids] = 0.0
         self.episode_terrain_tuck_active_steps[env_ids] = 0.0
         self.episode_terrain_tuck_error_sum[env_ids] = 0.0
@@ -447,6 +479,12 @@ class LeggedRobot(BaseTask):
         )
         self.extras["episode"]["spin_direction_accuracy"] = (
             episode_spin_direction_accuracy
+        )
+        self.extras["episode"]["mean_spin_position_drift_m"] = (
+            episode_mean_spin_position_drift_m
+        )
+        self.extras["episode"]["max_spin_position_drift_m"] = (
+            episode_max_spin_position_drift_m
         )
         self.extras["episode"]["terrain_tuck_active_fraction"] = (
             episode_terrain_tuck_active_fraction
@@ -1276,6 +1314,17 @@ class LeggedRobot(BaseTask):
                 device=self.device,
             ).squeeze(1)
 
+        # Command resampling may switch an environment from translation to an
+        # in-place command after the per-step transition check has run.
+        if hasattr(self, "spin_position_anchor"):
+            stationary_after = torch.abs(self.commands[env_ids, 0]) < 1.0e-6
+            entering_stationary = stationary_after & ~self.spin_was_stationary[env_ids]
+            stationary_ids = env_ids[entering_stationary]
+            self.spin_position_anchor[stationary_ids] = self.base_position[
+                stationary_ids, :2
+            ]
+            self.spin_was_stationary[env_ids] = stationary_after
+
     def _compute_torques(self, actions):
         """Compute torques from actions.
             Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
@@ -1682,7 +1731,14 @@ class LeggedRobot(BaseTask):
             dtype=torch.float,
             device=self.device,
             requires_grad=False,
-        )  # x vel, y vel, yaw vel, heading
+        )  # body-frame vx, yaw rate, height, optional internal heading
+        self.spin_position_anchor = self.base_position[:, :2].clone()
+        self.spin_was_stationary = torch.ones(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+            requires_grad=False,
+        )
         self.commands_scale = torch.tensor(
             [
                 self.obs_scales.lin_vel,
@@ -1781,6 +1837,12 @@ class LeggedRobot(BaseTask):
             self.episode_stationary_tilt_sum
         )
         self.episode_spin_direction_ok_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_position_drift_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_position_drift_max = torch.zeros_like(
             self.episode_stationary_tilt_sum
         )
         self.episode_spin_steps = torch.zeros_like(
@@ -2830,11 +2892,29 @@ class LeggedRobot(BaseTask):
         """Select SPIN samples that request no forward translation."""
         return (torch.abs(self.commands[:, 0]) < 1.0e-6).float()
 
+    def _spin_in_place_mask(self):
+        """Select actual in-place rotation commands, excluding idle holds."""
+        return self._spin_stationary_mask() * (
+            torch.abs(self.commands[:, 1]) > 0.25
+        ).float()
+
+    def _spin_moving_mask(self):
+        """Select commands that deliberately request body-x translation."""
+        threshold = max(self.cfg.rewards.spin_moving_command_threshold, 0.0)
+        return (torch.abs(self.commands[:, 0]) >= threshold).float()
+
     def _reward_spin_stationary_lin_vel(self):
         planar_speed = torch.abs(self.base_lin_vel[:, 0]) + torch.abs(
             self.base_lin_vel[:, 1]
         )
         return self._spin_stationary_mask() * planar_speed
+
+    def _reward_spin_stationary_position(self):
+        drift = torch.norm(
+            self.base_position[:, :2] - self.spin_position_anchor, dim=1
+        )
+        deadband = max(self.cfg.rewards.spin_stationary_position_deadband, 0.0)
+        return self._spin_in_place_mask() * torch.clamp(drift - deadband, min=0.0)
 
     def _reward_spin_stationary_ang_vel_xy(self):
         tilt_rate = torch.abs(self.base_ang_vel[:, 0]) + torch.abs(
@@ -2858,6 +2938,16 @@ class LeggedRobot(BaseTask):
 
     def _reward_spin_stationary_action_smooth(self):
         return self._spin_stationary_mask() * self._reward_action_smooth()
+
+    def _reward_spin_moving_lateral_vel(self):
+        return self._spin_moving_mask() * torch.abs(self.base_lin_vel[:, 1])
+
+    def _reward_spin_moving_wrong_way(self):
+        commanded_direction = torch.sign(self.commands[:, 0])
+        wrong_way_speed = torch.clamp(
+            -commanded_direction * self.base_lin_vel[:, 0], min=0.0
+        )
+        return self._spin_moving_mask() * wrong_way_speed
 
     def _reward_collision(self):
         # Penalize collisions on selected bodies
