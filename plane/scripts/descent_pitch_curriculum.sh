@@ -27,8 +27,7 @@ STAGE_KEYS=(
   reflex_pitch_hold_2p0
   reflex_speed_recovery_2p0
   reflex_speed_consolidation_2p0
-  legacy77000_speed_adaptation
-  legacy77000_speed_consolidation
+  legacy77000_extra_iterations
 )
 STAGE_LABELS=(
   "低速适应：认识俯仰约束"
@@ -47,10 +46,9 @@ STAGE_LABELS=(
   "高速碰坎俯仰抑制：2.0 m/s"
   "高速轮速恢复并提前收腿：2.0 m/s"
   "高速轮速、收伸腿与俯仰联合巩固：2.0 m/s"
-  "从旧77000提速：2.2 m/s适应"
-  "从旧77000提速：2.2 m/s巩固"
+  "旧77000原参数继续训练2000轮"
 )
-STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69000 70000 71000 72000 73500 74500 75500 77000 78500 80000)
+STAGE_TARGETS=(58000 60000 62500 63500 65000 66000 67000 68000 69000 70000 71000 72000 73500 74500 75500 77000 79000)
 STAGE_RUN_NAMES=(
   descent_pitch_longlegs_s01_adaptation
   descent_pitch_longlegs_s02_controlled_speed
@@ -68,8 +66,7 @@ STAGE_RUN_NAMES=(
   descent_pitch_hold_longlegs_s14_speed_2p0
   descent_speed_recovery_longlegs_s15_speed_2p0
   descent_speed_consolidation_longlegs_s16_speed_2p0
-  descent_legacy77000_speed_longlegs_s17_adaptation_2p2
-  descent_legacy77000_speed_longlegs_s18_consolidation_2p2
+  descent_legacy77000_same_config_longlegs_s17_extra_2000
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -701,17 +698,17 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_PITCH_RATE_SCALE=-0.90
       export WLG_ENTROPY_COEF=0.0008
       ;;
-    legacy77000_speed_adaptation)
+    legacy77000_extra_iterations)
       export WLG_MAX_INIT_TERRAIN_LEVEL=5
       export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
-      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=2.1
-      export WLG_MIXED_CUSTOM_HIGH_SPEED_FRACTION=0.65
+      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=2.0
+      export WLG_MIXED_CUSTOM_HIGH_SPEED_FRACTION=0.80
       export WLG_MIXED_CUSTOM_HIGH_SPEED_MIN=1.65
       export WLG_STAIR_UP_FIXED_HEIGHT=0.33
-      export WLG_TRACKING_LIN_VEL_SCALE=3.6
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=3.4
-      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.85
-      export WLG_CLIP_SINGLE_REWARD=5.0
+      export WLG_TRACKING_LIN_VEL_SCALE=2.8
+      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=3.0
+      export WLG_TRACKING_LIN_VEL_L1_SCALE=-0.70
+      export WLG_CLIP_SINGLE_REWARD=4.0
       export WLG_BASE_HEIGHT_SCALE=3.0
       export WLG_BASE_HEIGHT_ENHANCE_SCALE=2.0
       export WLG_BASE_HEIGHT_L1_SCALE=-0.8
@@ -728,54 +725,16 @@ apply_stage_environment() {
       export WLG_TERRAIN_IMPACT_TUCK_SCALE=4.2
       export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.65
       export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=1.00
-      export WLG_TERRAIN_IMPACT_SPEED_TRACKING_MULTIPLIER=0.25
-      export WLG_TERRAIN_IMPACT_DRIVE_TARGET_RATIO=0.50
-      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=4.0
+      export WLG_TERRAIN_IMPACT_SPEED_TRACKING_MULTIPLIER=1.0
+      export WLG_TERRAIN_IMPACT_DRIVE_TARGET_RATIO=1.0
+      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=5.0
       export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.11
       export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
       export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
       export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-18.0
       export WLG_TERRAIN_IMPACT_PITCH_SCALE=-22.0
       export WLG_TERRAIN_IMPACT_PITCH_RATE_SCALE=-0.90
-      export WLG_ENTROPY_COEF=0.0012
-      ;;
-    legacy77000_speed_consolidation)
-      export WLG_MAX_INIT_TERRAIN_LEVEL=5
-      export WLG_MIXED_TERRAIN_LIN_VEL_MAX=1.2
-      export WLG_MIXED_CUSTOM_LIN_VEL_MAX=2.2
-      export WLG_MIXED_CUSTOM_HIGH_SPEED_FRACTION=0.70
-      export WLG_MIXED_CUSTOM_HIGH_SPEED_MIN=1.70
-      export WLG_STAIR_UP_FIXED_HEIGHT=0.33
-      export WLG_TRACKING_LIN_VEL_SCALE=4.2
-      export WLG_TRACKING_LIN_VEL_ENHANCE_SCALE=3.8
-      export WLG_TRACKING_LIN_VEL_L1_SCALE=-1.0
-      export WLG_CLIP_SINGLE_REWARD=5.0
-      export WLG_BASE_HEIGHT_SCALE=3.0
-      export WLG_BASE_HEIGHT_ENHANCE_SCALE=2.0
-      export WLG_BASE_HEIGHT_L1_SCALE=-0.8
-      export WLG_ORIENTATION_SCALE=-12.5
-      export WLG_WHEEL_SUPPORT_SCALE=2.0
-      export WLG_TERRAIN_PITCH_SOFT_LIMIT_DEG=10
-      export WLG_TERRAIN_PITCH_TERMINATION_DEG=29
-      export WLG_FAIL_TO_TERMINAL_TIME_S=0.14
-      export WLG_TERRAIN_PITCH_EXCESS_SCALE=-60.0
-      export WLG_TERRAIN_PITCH_RATE_SCALE=-0.75
-      export WLG_TERRAIN_IMPACT_HORIZONTAL_FORCE=8.0
-      export WLG_TERRAIN_IMPACT_FORCE_RATIO=0.20
-      export WLG_TERRAIN_IMPACT_SPEED_RATIO=1.25
-      export WLG_TERRAIN_IMPACT_TUCK_SCALE=4.2
-      export WLG_TERRAIN_IMPACT_TUCK_VELOCITY_SCALE=0.65
-      export WLG_TERRAIN_IMPACT_TUCK_SPEED_GAIN=1.00
-      export WLG_TERRAIN_IMPACT_SPEED_TRACKING_MULTIPLIER=0.20
-      export WLG_TERRAIN_IMPACT_DRIVE_TARGET_RATIO=0.45
-      export WLG_TERRAIN_IMPACT_DRIVE_SCALE=4.5
-      export WLG_TERRAIN_IMPACT_TUCK_HOLD_S=0.11
-      export WLG_TERRAIN_IMPACT_EXTEND_SCALE=3.0
-      export WLG_TERRAIN_IMPACT_EXTEND_VELOCITY_SCALE=0.20
-      export WLG_TERRAIN_IMPACT_EXTEND_ORIENTATION_SCALE=-18.0
-      export WLG_TERRAIN_IMPACT_PITCH_SCALE=-22.0
-      export WLG_TERRAIN_IMPACT_PITCH_RATE_SCALE=-0.90
-      export WLG_ENTROPY_COEF=0.0010
+      export WLG_ENTROPY_COEF=0.0008
       ;;
     *) echo "Unknown stage: ${STAGE_KEYS[$stage_index]}" >&2; exit 2 ;;
   esac
