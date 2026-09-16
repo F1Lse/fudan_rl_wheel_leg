@@ -7,28 +7,28 @@ LOG_ROOT="$PLANE_ROOT/logs/wheel_legged"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-20}"
 
-BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-58000}"
-BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_fixed_56500_longlegs_s04_yaw_5}"
+BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-59000}"
+BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_centered_58000_longlegs_s01_yaw_5}"
 
 STAGE_KEYS=(
-  yaw_5_centered
+  yaw_5_centering_fix
   yaw_7_centered
   yaw_10_centered
   yaw_13_centered
 )
 STAGE_LABELS=(
-  "低位原地旋转重塑：0.16 m、yaw ±5、坐标锚定"
+  "低位原地旋转修正：0.16 m、yaw ±5、抑制平移与轮速不一致"
   "低位高速旋转：0.16 m、yaw ±7、坐标锚定"
   "低位高速旋转：0.16 m、yaw ±10、坐标锚定"
   "低位高速旋转：0.16 m、yaw ±13、坐标锚定"
 )
-# Four 1000-iteration stages continuing from the existing yaw-5 model_58000.pt.
-STAGE_TARGETS=(59000 60000 61000 62000)
+# Four 1000-iteration stages continuing from the centered yaw-5 model_59000.pt.
+STAGE_TARGETS=(60000 61000 62000 63000)
 STAGE_RUN_NAMES=(
-  spin_centered_58000_longlegs_s01_yaw_5
-  spin_centered_58000_longlegs_s02_yaw_7
-  spin_centered_58000_longlegs_s03_yaw_10
-  spin_centered_58000_longlegs_s04_yaw_13
+  spin_centerfix_59000_longlegs_s01_yaw_5
+  spin_centerfix_59000_longlegs_s02_yaw_7
+  spin_centerfix_59000_longlegs_s03_yaw_10
+  spin_centerfix_59000_longlegs_s04_yaw_13
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -36,16 +36,17 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/spin_curriculum.sh train
+  bash scripts/spin_curriculum.sh train-one
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 59000
-  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_59000.pt'
+  bash scripts/spin_curriculum.sh play 60000
+  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_60000.pt'
   bash scripts/spin_curriculum.sh export
 
-The first stage resumes from the existing yaw-5 model_58000.pt. If that
+The first stage resumes from the existing yaw-5 model_59000.pt. If that
 checkpoint has a different path, provide it explicitly:
 
-  WLG_SPIN_BASE_PT=/absolute/path/model_58000.pt \
+  WLG_SPIN_BASE_PT=/absolute/path/model_59000.pt \
     bash scripts/spin_curriculum.sh train
 
 Useful overrides:
@@ -282,6 +283,7 @@ apply_common_environment() {
   # from the first new update and is strengthened with each speed stage.
   export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.75
   export WLG_SPIN_STATIONARY_POSITION_SCALE=-4.0
+  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-1.5
   export WLG_SPIN_STATIONARY_POSITION_DEADBAND=0.025
   export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.15
   export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.0
@@ -300,17 +302,19 @@ apply_stage_environment() {
   export WLG_TERRAIN_PROPORTIONS=1.0,0.0,0.0,0.0,0.0,0.0
 
   case "${STAGE_KEYS[$stage_index]}" in
-    yaw_5_centered)
+    yaw_5_centering_fix)
       export WLG_ANG_VEL_YAW_MIN=-5.0
       export WLG_ANG_VEL_YAW_MAX=5.0
       export WLG_SPIN_MOVING_YAW_MAX=5.0
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-3.0
       ;;
     yaw_7_centered)
       export WLG_ANG_VEL_YAW_MIN=-7.0
       export WLG_ANG_VEL_YAW_MAX=7.0
       export WLG_SPIN_MOVING_YAW_MAX=7.0
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.0
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-3.0
       export WLG_SPIN_STATIONARY_POSITION_SCALE=-6.0
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-1.75
       export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.25
       export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
       ;;
@@ -318,8 +322,9 @@ apply_stage_environment() {
       export WLG_ANG_VEL_YAW_MIN=-10.0
       export WLG_ANG_VEL_YAW_MAX=10.0
       export WLG_SPIN_MOVING_YAW_MAX=10.0
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.25
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-3.5
       export WLG_SPIN_STATIONARY_POSITION_SCALE=-8.0
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-2.0
       export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.30
       export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.5
       ;;
@@ -329,8 +334,9 @@ apply_stage_environment() {
       export WLG_SPIN_MOVING_YAW_MAX=13.0
       export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.18
       export WLG_ORIENTATION_SCALE=-6.0
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.5
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-4.0
       export WLG_SPIN_STATIONARY_POSITION_SCALE=-10.0
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-2.5
       export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.50
       export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-6.0
       export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.015
@@ -357,9 +363,10 @@ print_stage_config() {
   else
     printf '  mixed_spin: idle=10%%, in_place=45%%, moving=45%%\n'
   fi
-  printf '  XY anchor: scale=%s, deadband=%sm; moving lateral=%s, wrong-way=%s\n' \
+  printf '  XY anchor: scale=%s, deadband=%sm; wheel mismatch=%s; moving lateral=%s, wrong-way=%s\n' \
     "$WLG_SPIN_STATIONARY_POSITION_SCALE" \
     "$WLG_SPIN_STATIONARY_POSITION_DEADBAND" \
+    "$WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE" \
     "$WLG_SPIN_MOVING_LATERAL_VEL_SCALE" \
     "$WLG_SPIN_MOVING_WRONG_WAY_SCALE"
   printf '  yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
@@ -455,6 +462,10 @@ train_all() {
       echo "Stage stopped at model_${iter}.pt; rerun 'train' to continue." >&2
       exit 130
     fi
+    if [[ "${WLG_SPIN_STOP_AFTER_STAGE:-0}" == "1" ]]; then
+      echo "Stage complete at model_${iter}.pt; stopping for validation."
+      return 0
+    fi
   done
 
   IFS=$'\t' read -r stage_index iter path < <(latest_checkpoint_overall)
@@ -521,6 +532,7 @@ trap on_interrupt INT TERM
 
 case "${1:-train}" in
   train) train_all ;;
+  train-one) WLG_SPIN_STOP_AFTER_STAGE=1 train_all ;;
   status) show_status ;;
   play) play_checkpoint "${2:-}" ;;
   export) export_latest ;;

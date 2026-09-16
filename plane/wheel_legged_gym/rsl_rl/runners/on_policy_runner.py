@@ -116,6 +116,7 @@ _EPISODE_METRIC_GROUPS = (
         (
             "rew_spin_stationary_lin_vel",
             "rew_spin_stationary_position",
+            "rew_spin_stationary_wheel_speed_mismatch",
             "rew_spin_stationary_ang_vel_xy",
             "rew_spin_stationary_orientation",
             "rew_spin_stationary_action_rate",
@@ -126,6 +127,8 @@ _EPISODE_METRIC_GROUPS = (
             "rms_stationary_tilt_deg",
             "mean_spin_position_drift_m",
             "max_spin_position_drift_m",
+            "mean_spin_planar_speed_mps",
+            "mean_spin_wheel_speed_mismatch_rads",
         ),
     ),
     (
@@ -186,6 +189,7 @@ _EPISODE_METRIC_LABELS = {
     "terrain_level": "平均地形等级",
     "rew_spin_stationary_lin_vel": "旋转时平移漂移惩罚",
     "rew_spin_stationary_position": "原地旋转坐标漂移惩罚",
+    "rew_spin_stationary_wheel_speed_mismatch": "原地旋转两轮速度不一致惩罚",
     "rew_spin_stationary_ang_vel_xy": "旋转时横滚/俯仰速度惩罚",
     "rew_spin_stationary_orientation": "旋转时姿态惩罚",
     "rew_spin_stationary_action_rate": "旋转时动作变化惩罚",
@@ -194,6 +198,8 @@ _EPISODE_METRIC_LABELS = {
     "rew_spin_moving_wrong_way": "移动旋转反向运动惩罚",
     "mean_spin_position_drift_m": "原地旋转平均坐标漂移（米）",
     "max_spin_position_drift_m": "原地旋转最大坐标漂移（米）",
+    "mean_spin_planar_speed_mps": "原地旋转平均平面速度（米每秒）",
+    "mean_spin_wheel_speed_mismatch_rads": "原地旋转两轮速度半差（弧度每秒）",
     "rew_action_rate": "动作变化惩罚",
     "rew_action_smooth": "动作平滑惩罚",
     "rew_dof_acc": "关节加速度惩罚",

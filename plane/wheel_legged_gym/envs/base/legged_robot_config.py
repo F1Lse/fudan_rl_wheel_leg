@@ -476,6 +476,12 @@ class LeggedRobotCfg(BaseConfig):
             spin_stationary_position = _env_float(
                 "WLG_SPIN_STATIONARY_POSITION_SCALE", 0.0
             )
+            # The mirrored ±90-degree leg-root frames make equal numeric wheel
+            # speeds produce opposite ground velocities. Penalize their speed
+            # mismatch so a zero-vx yaw remains centered.
+            spin_stationary_wheel_speed_mismatch = _env_float(
+                "WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE", 0.0
+            )
             spin_stationary_ang_vel_xy = _env_float(
                 "WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE", 0.0
             )

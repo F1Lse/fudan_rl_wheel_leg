@@ -206,12 +206,18 @@ class LeggedRobot(BaseTask):
         spin_position_drift = torch.norm(
             self.base_position[:, :2] - self.spin_position_anchor, dim=1
         )
+        spin_planar_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
+        spin_wheel_speed_mismatch = self._spin_wheel_speed_mismatch()
         self.episode_spin_position_drift_sum += (
             spin_position_drift * commanded_spin
         )
         self.episode_spin_position_drift_max = torch.maximum(
             self.episode_spin_position_drift_max,
             spin_position_drift * commanded_spin,
+        )
+        self.episode_spin_planar_speed_sum += spin_planar_speed * commanded_spin
+        self.episode_spin_wheel_speed_mismatch_sum += (
+            spin_wheel_speed_mismatch * commanded_spin
         )
         self.episode_spin_steps += commanded_spin
         self._update_terrain_impact_tuck_state()
@@ -357,6 +363,12 @@ class LeggedRobot(BaseTask):
         episode_max_spin_position_drift_m = torch.mean(
             self.episode_spin_position_drift_max[env_ids]
         )
+        episode_mean_spin_planar_speed_mps = (
+            torch.sum(self.episode_spin_planar_speed_sum[env_ids]) / spin_steps
+        )
+        episode_mean_spin_wheel_speed_mismatch_rads = (
+            torch.sum(self.episode_spin_wheel_speed_mismatch_sum[env_ids]) / spin_steps
+        )
         tuck_active_steps = torch.clamp(
             torch.sum(self.episode_terrain_tuck_active_steps[env_ids]), min=1.0
         )
@@ -436,6 +448,8 @@ class LeggedRobot(BaseTask):
         self.episode_spin_direction_ok_sum[env_ids] = 0.0
         self.episode_spin_position_drift_sum[env_ids] = 0.0
         self.episode_spin_position_drift_max[env_ids] = 0.0
+        self.episode_spin_planar_speed_sum[env_ids] = 0.0
+        self.episode_spin_wheel_speed_mismatch_sum[env_ids] = 0.0
         self.episode_spin_steps[env_ids] = 0.0
         self.episode_terrain_tuck_active_steps[env_ids] = 0.0
         self.episode_terrain_tuck_error_sum[env_ids] = 0.0
@@ -485,6 +499,12 @@ class LeggedRobot(BaseTask):
         )
         self.extras["episode"]["max_spin_position_drift_m"] = (
             episode_max_spin_position_drift_m
+        )
+        self.extras["episode"]["mean_spin_planar_speed_mps"] = (
+            episode_mean_spin_planar_speed_mps
+        )
+        self.extras["episode"]["mean_spin_wheel_speed_mismatch_rads"] = (
+            episode_mean_spin_wheel_speed_mismatch_rads
         )
         self.extras["episode"]["terrain_tuck_active_fraction"] = (
             episode_terrain_tuck_active_fraction
@@ -1660,6 +1680,22 @@ class LeggedRobot(BaseTask):
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+        wheel_dof_indices = [
+            index
+            for index, name in enumerate(self.dof_names)
+            if "wheel" in name.lower()
+        ]
+        if len(wheel_dof_indices) != 2:
+            raise RuntimeError(
+                "SPIN training requires exactly two wheel DOFs; found "
+                f"{wheel_dof_indices} in {self.dof_names}"
+            )
+        self.wheel_dof_indices = torch.tensor(
+            wheel_dof_indices,
+            dtype=torch.long,
+            device=self.device,
+            requires_grad=False,
+        )
         self.dof_acc = torch.zeros_like(self.dof_vel)
         self.base_quat = self.root_states[:, 3:7]
 
@@ -1843,6 +1879,12 @@ class LeggedRobot(BaseTask):
             self.episode_stationary_tilt_sum
         )
         self.episode_spin_position_drift_max = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_planar_speed_sum = torch.zeros_like(
+            self.episode_stationary_tilt_sum
+        )
+        self.episode_spin_wheel_speed_mismatch_sum = torch.zeros_like(
             self.episode_stationary_tilt_sum
         )
         self.episode_spin_steps = torch.zeros_like(
@@ -2915,6 +2957,27 @@ class LeggedRobot(BaseTask):
         )
         deadband = max(self.cfg.rewards.spin_stationary_position_deadband, 0.0)
         return self._spin_in_place_mask() * torch.clamp(drift - deadband, min=0.0)
+
+    def _spin_wheel_speed_mismatch(self):
+        """Numeric wheel-speed mismatch during an in-place spin.
+
+        The URDF gives the right and left leg-root frames +90/-90 degree roll.
+        Although both wheel joints use local +Z axes, their physical axes are
+        mirrored in the body frame.  Equal numeric wheel speeds therefore
+        produce opposite ground velocities and an in-place yaw; their half
+        difference is the unwanted translation-producing component.
+        """
+        wheel_vel = torch.index_select(self.dof_vel, 1, self.wheel_dof_indices)
+        return 0.5 * torch.abs(wheel_vel[:, 0] - wheel_vel[:, 1])
+
+    def _reward_spin_stationary_wheel_speed_mismatch(self):
+        # Normalize rad/s to the same scale used in actor observations.  This
+        # term is directly inferable from dof_vel and does not change the ONNX
+        # observation layout or require world-position feedback on the robot.
+        normalized_mismatch = (
+            self._spin_wheel_speed_mismatch() * self.obs_scales.dof_vel
+        )
+        return self._spin_in_place_mask() * normalized_mismatch
 
     def _reward_spin_stationary_ang_vel_xy(self):
         tilt_rate = torch.abs(self.base_ang_vel[:, 0]) + torch.abs(
