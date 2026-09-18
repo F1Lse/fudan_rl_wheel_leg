@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="Ranger-18 urdf">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.11397 0.088903 0.61645"
+        rpy="0 0 0" />
+      <mass
+        value="158.48" />
+      <inertia
+        ixx="7.3009"
+        ixy="1.1884E-05"
+        ixz="0.00037067"
+        iyy="7.3003"
+        iyz="-1.759E-05"
+        izz="12.941" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.2 0.2 0.2 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="L1">
+    <inertial>
+      <origin
+        xyz="-0.075303 -0.013536 0.01134"
+        rpy="0 0 0" />
+      <mass
+        value="0.8302" />
+      <inertia
+        ixx="0.00070228"
+        ixy="5.6066E-05"
+        ixz="6.0407E-07"
+        iyy="0.0021875"
+        iyz="3.7069E-06"
+        izz="0.0028464" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.3 0.3 0.3 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J1"
+    type="revolute">
+    <origin
+      xyz="0 -0.169 0.131"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="L1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-100"
+      upper="100"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="L2">
+    <inertial>
+      <origin
+        xyz="-0.00061651 -0.12646 0.015807"
+        rpy="0 0 0" />
+      <mass
+        value="0.61657" />
+      <inertia
+        ixx="0.0034463"
+        ixy="-7.1665E-05"
+        ixz="-2.1776E-07"
+        iyy="0.00019866"
+        iyz="-4.9867E-06"
+        izz="0.0036129" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.2 0.3 0.4 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J2"
+    type="revolute">
+    <origin
+      xyz="-0.21 0 0.0191"
+      rpy="0 0 0" />
+    <parent
+      link="L1" />
+    <child
+      link="L2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-0.0675"
+      upper="1.12"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="L3">
+    <inertial>
+      <origin
+        xyz="2.3397E-05 -6.5063E-06 0.0098494"
+        rpy="0 0 0" />
+      <mass
+        value="0.24097" />
+      <inertia
+        ixx="0.00021425"
+        ixy="-6.3548E-08"
+        ixz="-8.0591E-08"
+        iyy="0.00021415"
+        iyz="3.772E-08"
+        izz="0.00040245" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.5 0.5 0.5 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J3"
+    type="continuous">
+    <origin
+      xyz="0 -0.25 0.025"
+      rpy="0 0 0" />
+    <parent
+      link="L2" />
+    <child
+      link="L3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="L4">
+    <inertial>
+      <origin
+        xyz="-0.075409 0.012316 0.011362"
+        rpy="0 0 0" />
+      <mass
+        value="0.84094" />
+      <inertia
+        ixx="0.00070891"
+        ixy="-6.1867E-05"
+        ixz="7.2323E-07"
+        iyy="0.002193"
+        iyz="-3.4274E-06"
+        izz="0.0028585" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.3 0.3 0.3 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J4"
+    type="revolute">
+    <origin
+      xyz="0 0.169 0.131"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="L4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-100"
+      upper="100"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="L5">
+    <inertial>
+      <origin
+        xyz="0.0002408 0.12991 0.013521"
+        rpy="0 0 0" />
+      <mass
+        value="0.58407" />
+      <inertia
+        ixx="0.0033562"
+        ixy="7.4293E-05"
+        ixz="-1.0917E-07"
+        iyy="0.00018162"
+        iyz="4.4651E-06"
+        izz="0.0035034" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.2 0.3 0.4 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J5"
+    type="revolute">
+    <origin
+      xyz="-0.21 0 0.0191"
+      rpy="0 0 0" />
+    <parent
+      link="L4" />
+    <child
+      link="L5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.12"
+      upper="0.0675"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="L6">
+    <inertial>
+      <origin
+        xyz="-5.5511E-17 2.7756E-17 0.013226"
+        rpy="0 0 0" />
+      <mass
+        value="0.20018" />
+      <inertia
+        ixx="0.00020675"
+        ixy="1.2048E-20"
+        ixz="-1.7574E-19"
+        iyy="0.00020675"
+        iyz="1.1294E-19"
+        izz="0.00039322" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.5 0.5 0.5 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://Ranger-18 urdf/meshes/L6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="J6"
+    type="continuous">
+    <origin
+      xyz="0 0.25 0.025"
+      rpy="0 0 0" />
+    <parent
+      link="L5" />
+    <child
+      link="L6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>
