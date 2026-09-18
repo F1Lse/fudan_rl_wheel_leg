@@ -1043,6 +1043,54 @@ class LeggedRobot(BaseTask):
                 self.commands[env_ids, 1] = yaw_sign * yaw_magnitude
                 self.commands[env_ids[idle], 1] = 0.0
 
+        if self.cfg.commands.command_profile == "spin_recovery":
+            # Directional recovery curriculum for an asymmetric policy:
+            # positive yaw gets a gradual low-to-high ramp, with a smaller
+            # near-limit tranche; negative yaw is retained so the already
+            # working direction is not forgotten.
+            count = len(env_ids)
+            if count:
+                profile = torch.rand(count, device=self.device)
+                yaw_limit = max(
+                    abs(self.cfg.commands.ranges.ang_vel_yaw[0]),
+                    abs(self.cfg.commands.ranges.ang_vel_yaw[1]),
+                )
+                positive_ramp = (profile >= 0.05) & (profile < 0.45)
+                positive_near = (profile >= 0.45) & (profile < 0.65)
+                negative_ramp = (profile >= 0.65) & (profile < 0.95)
+                negative_near = profile >= 0.95
+                self.commands[env_ids, 0] = 0.0
+                self.commands[env_ids, 1] = 0.0
+
+                ramp_mask = positive_ramp | negative_ramp
+                ramp_count = int(ramp_mask.sum().item())
+                if ramp_count:
+                    ramp_ids = env_ids[ramp_mask]
+                    ramp_sign = torch.where(
+                        positive_ramp[ramp_mask],
+                        torch.ones(ramp_count, device=self.device),
+                        -torch.ones(ramp_count, device=self.device),
+                    )
+                    self.commands[ramp_ids, 1] = ramp_sign * yaw_limit * torch.rand(
+                        ramp_count, device=self.device
+                    )
+
+                near_mask = positive_near | negative_near
+                near_count = int(near_mask.sum().item())
+                if near_count:
+                    near_ids = env_ids[near_mask]
+                    near_sign = torch.where(
+                        positive_near[near_mask],
+                        torch.ones(near_count, device=self.device),
+                        -torch.ones(near_count, device=self.device),
+                    )
+                    near_min = 0.78 * yaw_limit
+                    self.commands[near_ids, 1] = near_sign * (
+                        near_min
+                        + (yaw_limit - near_min)
+                        * torch.rand(near_count, device=self.device)
+                    )
+
         if self.cfg.commands.command_profile == "spin_mixed":
             # A single deployable SPIN policy needs several deliberately
             # different operating points. Independent sampling underrepresents

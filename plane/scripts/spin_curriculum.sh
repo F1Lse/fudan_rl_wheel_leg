@@ -12,22 +12,26 @@ BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_centerfix_58000_longlegs_s01_yaw_5
 
 STAGE_KEYS=(
   yaw_7_speed
+  yaw_7_stability
   yaw_10_speed
   yaw_13_speed
 )
 STAGE_LABELS=(
   "开源式转速获取：0.16 m、yaw ±7、只强化角速度跟踪"
+  "稳态整平：0.16 m、yaw ±7、强化水平姿态与左右轮一致性"
   "开源式转速获取：0.16 m、yaw ±10、只强化角速度跟踪"
   "开源式转速获取：0.16 m、yaw ±13、只强化角速度跟踪"
 )
-# First acquire yaw speed from model_59000.pt. Coordinate anchoring and wheel
-# mismatch are intentionally disabled; they are handled by a later stability
-# consolidation stage after the speed capability is established.
-STAGE_TARGETS=(61000 63000 65000)
+# Starting from model_59000.pt, first consolidate the steady
+# posture before extending the command range again. The stability stage is
+# deliberately inserted at ±7 so it does not sacrifice the newly acquired yaw
+# authority while correcting the visible roll/pitch bias.
+STAGE_TARGETS=(61000 64000 66000 68000)
 STAGE_RUN_NAMES=(
   spin_open_59000_longlegs_s01_yaw_7_speed
-  spin_open_59000_longlegs_s02_yaw_10_speed
-  spin_open_59000_longlegs_s03_yaw_13_speed
+  spin_open_59000_longlegs_s02_yaw_7_stability
+  spin_open_59000_longlegs_s03_yaw_10_speed
+  spin_open_59000_longlegs_s04_yaw_13_speed
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -210,10 +214,12 @@ apply_common_environment() {
   export WLG_TERRAIN_CURRICULUM=0
   export WLG_SLOPE_THRESHOLD=0.45
   export WLG_COMMAND_CURRICULUM=0
-  export WLG_COMMAND_PROFILE=spin_fixed
-  # Long holds are closer to joystick operation and avoid repeated +limit to
-  # -limit steps before the policy has time to settle.
-  export WLG_COMMAND_RESAMPLING_TIME=8.0
+  # Match the historical/open-source sampler during speed acquisition. A
+  # continuous yaw range keeps already learned lower speeds in every new stage
+  # instead of sending most environments straight to the new endpoint.
+  export WLG_COMMAND_PROFILE=independent
+  # One command per 20 s episode avoids destructive +limit to -limit reversals.
+  export WLG_COMMAND_RESAMPLING_TIME=25.0
   export WLG_REVERSE_CLIMB_FIXED_HEIGHT=-1
   export WLG_STAIR_UP_FIXED_HEIGHT=-1
   export WLG_HIGHSTAND_ANCHOR_FRACTION=0.0
@@ -280,12 +286,14 @@ apply_common_environment() {
 
   # Speed-acquisition phase: do not compete with the yaw tracker using custom
   # world-position or wheel-mismatch penalties. Those are added later.
-  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=0.0
-  export WLG_SPIN_STATIONARY_POSITION_SCALE=0.0
+  # Keep a mild center/low-planar-speed signal from the first stage. The
+  # previous speed-only curriculum learned to rotate by driving in a circle.
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.35
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.20
   export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
   export WLG_SPIN_STATIONARY_POSITION_DEADBAND=0.025
-  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=0.0
-  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=0.0
+  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.05
+  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-0.50
   export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=0.0
   export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=0.0
   # Moving rotation is intentionally deferred until in-place spin is verified.
@@ -301,14 +309,55 @@ apply_stage_environment() {
   export WLG_TERRAIN_PROPORTIONS=1.0,0.0,0.0,0.0,0.0,0.0
 
   case "${STAGE_KEYS[$stage_index]}" in
+    yaw_5_speed)
+      export WLG_ANG_VEL_YAW_MIN=-5.0
+      export WLG_ANG_VEL_YAW_MAX=5.0
+      export WLG_SPIN_MOVING_YAW_MAX=5.0
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.5
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
+      export WLG_SPIN_FIXED_NEAR_FRACTION=0.30
+      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
+      export WLG_ENTROPY_COEF=0.0020
+      ;;
     yaw_7_speed)
       export WLG_ANG_VEL_YAW_MIN=-7.0
       export WLG_ANG_VEL_YAW_MAX=7.0
       export WLG_SPIN_MOVING_YAW_MAX=7.0
       export WLG_TRACKING_ANG_VEL_SCALE=2.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
-      export WLG_ENTROPY_COEF=0.0050
+      # Overlap the previous ±5 capability: 50% of non-idle samples are
+      # drawn from roughly 4.9–7 instead of jumping almost always to ±7.
+      export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
+      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_ENTROPY_COEF=0.0015
+      ;;
+    yaw_7_stability)
+      # The positive direction is currently weak. Use a recovery sampler that
+      # ramps positive yaw through the whole range before showing many +7
+      # endpoints, while retaining enough negative samples to preserve -7.
+      export WLG_COMMAND_PROFILE=spin_recovery
+      export WLG_ANG_VEL_YAW_MIN=-7.0
+      export WLG_ANG_VEL_YAW_MAX=7.0
+      export WLG_SPIN_MOVING_YAW_MAX=7.0
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.75
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
+      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
+      # The resumed policy already turns. Spend this stage on the steady
+      # attitude seen in play: stronger gravity-vector and angular-rate
+      # penalties, plus a mild differential-wheel penalty to remove yaw drift.
+      export WLG_ORIENTATION_SCALE=-10.0
+      export WLG_ANG_VEL_XY_SCALE=-0.10
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.50
+      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.30
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.20
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.18
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-2.5
+      export WLG_WHEEL_SUPPORT_SCALE=0.40
+      export WLG_ENTROPY_COEF=0.0005
       ;;
     yaw_10_speed)
       export WLG_ANG_VEL_YAW_MIN=-10.0
@@ -316,8 +365,18 @@ apply_stage_environment() {
       export WLG_SPIN_MOVING_YAW_MAX=10.0
       export WLG_TRACKING_ANG_VEL_SCALE=2.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
-      export WLG_ENTROPY_COEF=0.0040
+      # Overlap the previous ±7 capability while extending to ±10.
+      export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
+      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_ORIENTATION_SCALE=-6.0
+      export WLG_ANG_VEL_XY_SCALE=-0.08
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
+      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.25
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.10
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.10
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-1.0
+      export WLG_ENTROPY_COEF=0.0008
       ;;
     yaw_13_speed)
       export WLG_ANG_VEL_YAW_MIN=-13.0
@@ -325,8 +384,18 @@ apply_stage_environment() {
       export WLG_SPIN_MOVING_YAW_MAX=13.0
       export WLG_TRACKING_ANG_VEL_SCALE=2.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
-      export WLG_ENTROPY_COEF=0.0030
+      # Keep the lower edge near 10 rad/s so the ±13 stage remains reachable.
+      export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
+      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.75
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_ORIENTATION_SCALE=-5.0
+      export WLG_ANG_VEL_XY_SCALE=-0.07
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
+      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.25
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.08
+      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.08
+      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-0.80
+      export WLG_ENTROPY_COEF=0.0008
       ;;
     *)
       echo "Unknown SPIN stage: ${STAGE_KEYS[$stage_index]}" >&2
@@ -344,7 +413,12 @@ print_stage_config() {
     "$WLG_ANG_VEL_YAW_MIN" "$WLG_ANG_VEL_YAW_MAX" \
     "$WLG_HEIGHT_MIN" "$WLG_HEIGHT_MAX"
   if [[ "$WLG_COMMAND_PROFILE" == spin_fixed ]]; then
-    printf '  fixed_spin: exact=80%%, near=10%%, idle=10%%\n'
+    printf '  fixed_spin: idle=%s, near=%s, near_min_ratio=%s, exact=rest\n' \
+      "$WLG_SPIN_FIXED_IDLE_FRACTION" \
+      "$WLG_SPIN_FIXED_NEAR_FRACTION" \
+      "$WLG_SPIN_FIXED_NEAR_MIN_RATIO"
+  elif [[ "$WLG_COMMAND_PROFILE" == independent ]]; then
+    printf '  independent_spin: yaw sampled uniformly over the full range\n'
   else
     printf '  mixed_spin: idle=10%%, in_place=45%%, moving=45%%\n'
   fi
