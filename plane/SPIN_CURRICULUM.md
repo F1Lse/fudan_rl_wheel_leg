@@ -1,30 +1,25 @@
 # 长腿车型 SPIN 综合策略训练
 
-这是一条独立于正常行驶和下台阶专用模型的续训链。当前从实车表现可用的修正版 `model_59000.pt` 分叉；过度约束后得到的旧 yaw ±7 `model_60000.pt` 实际只能达到约 4.2 rad/s，因此不再继承：
+这是一条独立于正常行驶和下台阶专用模型的续训链。当前从实车表现可用的修正版 `model_59000.pt` 分叉，先按开源式奖励把 yaw 跟踪速度学起来：
 
-- 0.16 m 低姿态原地旋转，先用 yaw ±6 过渡 500 轮，再用 yaw ±7 巩固 1000 轮；
-- 在 yaw ±7 已能达到约 6.45 rad/s 后，每次只增加 1 rad/s，以 500 轮一级逐步训练到 yaw ±13；
-- 增强yaw跟踪，同时适度放松瞬时平面速度、世界坐标 XY 和两轮速度差惩罚；
+- 0.16 m 低姿态原地旋转，按 yaw ±7、±10、±13 分三级训练，每级 2000 轮；
+- 第一阶段只保留标准角速度跟踪、高度、姿态和动作平滑奖励；
+- 暂时关闭坐标原点和两轮轮速差奖励，避免它们与转速获取目标竞争；
 - 本轮不加入移动旋转、变高度或地形，先验证真正原地旋转。
 
 最终只导出一个 SPIN ONNX。楼梯、离散障碍和双向特殊坎不进入本课程。
 
 ## 阶段
 
-1. `59000–59500`：yaw ±6 过渡，500 轮。
-2. `59500–60500`：yaw ±7 巩固，1000 轮。
-3. `60500–61000`：yaw ±8，500 轮。
-4. `61000–61500`：yaw ±9，500 轮。
-5. `61500–62000`：yaw ±10，500 轮。
-6. `62000–62500`：yaw ±11，500 轮。
-7. `62500–63000`：yaw ±12，500 轮。
-8. `63000–63500`：yaw ±13，500 轮。
+1. `59000–61000`：yaw ±7，2000 轮。
+2. `61000–63000`：yaw ±10，2000 轮。
+3. `63000–65000`：yaw ±13，2000 轮。
 
-从 `60500` 继续到 `63500` 共 3000 轮。按当前约 `0.92 s/轮` 估算约需 46 分钟。各级只缓慢提高 yaw 跟踪奖励和原地约束，避免再次出现“约束很强但转速上不去”。
+总计 6000 轮。每级完成后先检查实际转速和方向正确率，再决定是否进入下一级。坐标漂移暂时作为诊断指标，不作为这一阶段的训练目标。
 
-世界坐标 XY 与机体线速度没有加入 actor 观测，因此策略不能依靠绝对位置闭环返回起点。修正版保留坐标锚定作为训练约束，同时利用 actor 已有的两轮关节速度观测，惩罚左右轮数值不一致。当前 URDF 的左右腿根坐标系分别旋转 `+90°/-90°`，所以两个轮关节的物理轴方向相反；真正原地旋转时，两轮关节速度数值应当近似相同。该约束不会改变 ONNX 输入或 STM32 接口。
+世界坐标 XY 与机体线速度没有加入 actor 观测，因此这一阶段不使用坐标原点闭环奖励。后续如果需要原地稳定，再单独增加可部署的稳定约束；不要在转速尚未建立时同时加入多个强约束。
 
-`spin_fixed` 的每个阶段都以高概率给出该阶段的固定转速，只保留少量近邻转速和静止样本。当前课程从 yaw ±6 逐级提高到 ±13，暂不加入平移、变高度或地形；先完成低位高速原地旋转，之后再单独训练“一边转一边走”。
+`spin_fixed` 的每个阶段都以高概率给出该阶段的固定转速，只保留少量近邻转速和静止样本。当前课程从 yaw ±7 逐级提高到 ±13，暂不加入平移、变高度或地形；先完成低位高速原地旋转，之后再单独训练“一边转一边走”。
 
 当前 actor 命令仍保持部署兼容的 3 维顺序：`vx、yaw、height`，没有 `vy`。两轮底盘不能直接产生独立侧向速度；若上层使用云台坐标系速度，应先转换为底盘可执行的前向速度与 yaw/航向命令。增加 `vy` 会改变观测维度、ONNX 输入和 STM32 接口，需要另开一条从头训练的策略链。
 
@@ -51,7 +46,7 @@ bash scripts/spin_curriculum.sh status
 bash scripts/spin_curriculum.sh train-one
 ```
 
-`train-one` 只完成当前第一个未完成阶段，适合每 500 轮人工 Play 验证一次。使用 `train` 会自动跳过已完成阶段，并连续训练到 `63500`。
+`train-one` 只完成当前第一个未完成阶段，适合每 2000 轮人工 Play 验证一次。使用 `train` 会自动跳过已完成阶段，并连续训练到 `65000`。
 
 脚本会自动寻找以下路径形式的起始模型：
 
@@ -68,21 +63,21 @@ WLG_SPIN_BASE_PT=logs/wheel_legged/你的目录/model_59000.pt \
 
 随时可以 `Ctrl+C`，重新执行 `train` 会从该阶段最新的 `model_*.pt` 接着训练。
 
-验证最新模型：
+验证 yaw ±7：
 
 ```bash
 WLG_PLAY_NUM_ENVS=1 \
 WLG_PLAY_HEIGHT=0.16 \
-WLG_PLAY_INITIAL_YAW=6.0 \
-WLG_PLAY_YAW_STEP=6.0 \
-  bash scripts/spin_curriculum.sh play 59500
+WLG_PLAY_INITIAL_YAW=7.0 \
+WLG_PLAY_YAW_STEP=7.0 \
+  bash scripts/spin_curriculum.sh play 61000
 ```
 
-验证指定检查点（例如 yaw 7）：
+验证 yaw ±10：
 
 ```bash
-WLG_PLAY_NUM_ENVS=1 WLG_PLAY_INITIAL_YAW=7.0 WLG_PLAY_YAW_STEP=7.0 \
-  bash scripts/spin_curriculum.sh play 60500
+WLG_PLAY_NUM_ENVS=1 WLG_PLAY_INITIAL_YAW=10.0 WLG_PLAY_YAW_STEP=10.0 \
+  bash scripts/spin_curriculum.sh play 63000
 ```
 
 验证最终 yaw 13：
@@ -90,7 +85,7 @@ WLG_PLAY_NUM_ENVS=1 WLG_PLAY_INITIAL_YAW=7.0 WLG_PLAY_YAW_STEP=7.0 \
 ```bash
 WLG_PLAY_NUM_ENVS=1 WLG_PLAY_HEIGHT=0.16 \
 WLG_PLAY_INITIAL_YAW=13.0 WLG_PLAY_YAW_STEP=13.0 \
-  bash scripts/spin_curriculum.sh play 63500
+  bash scripts/spin_curriculum.sh play 65000
 ```
 
 如果目录名包含空格，或者脚本无法按 run 名自动发现 checkpoint，可以直接传入完整 PT 路径；路径必须用引号包住：
@@ -98,10 +93,10 @@ WLG_PLAY_INITIAL_YAW=13.0 WLG_PLAY_YAW_STEP=13.0 \
 ```bash
 WLG_PLAY_NUM_ENVS=1 WLG_PLAY_HEIGHT=0.16 WLG_PLAY_YAW_STEP=7.0 \
   bash scripts/spin_curriculum.sh play \
-  'logs/wheel_legged/<时间>_spin_yawrecover_59000_longlegs_s02_yaw_7/model_60500.pt'
+  'logs/wheel_legged/<时间>_spin_open_59000_longlegs_s01_yaw_7_speed/model_61000.pt'
 ```
 
-Play 中按住 `A/D` 旋转，`E` 停止。当前课程的前后速度固定为 `0`、高度固定为 `0.16 m`，因此 `W/S` 和 `X/C` 会被训练范围裁回固定值。检查点依次对应：`59500→6`、`60500→7`、`61000→8`、`61500→9`、`62000→10`、`62500→11`、`63000→12`、`63500→13 rad/s`。实车应从较低命令逐步增加。
+Play 中按住 `A/D` 旋转，`E` 停止。当前课程的前后速度固定为 `0`、高度固定为 `0.16 m`，因此 `W/S` 和 `X/C` 会被训练范围裁回固定值。检查点依次对应：`61000→7`、`63000→10`、`65000→13 rad/s`。实车应从较低命令逐步增加。
 
 导出最新 SPIN ONNX：
 

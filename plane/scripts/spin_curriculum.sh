@@ -11,37 +11,23 @@ BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-59000}"
 BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_centerfix_58000_longlegs_s01_yaw_5}"
 
 STAGE_KEYS=(
-  yaw_6_bridge
-  yaw_7_recovery
-  yaw_8_step
-  yaw_9_step
-  yaw_10_step
-  yaw_11_step
-  yaw_12_step
-  yaw_13_step
+  yaw_7_speed
+  yaw_10_speed
+  yaw_13_speed
 )
 STAGE_LABELS=(
-  "低位转速过渡：0.16 m、yaw ±6、适度放松原地约束"
-  "低位转速巩固：0.16 m、yaw ±7、兼顾转速和漂移"
-  "低位逐级升速：0.16 m、yaw ±8"
-  "低位逐级升速：0.16 m、yaw ±9"
-  "低位逐级升速：0.16 m、yaw ±10"
-  "低位逐级升速：0.16 m、yaw ±11"
-  "低位逐级升速：0.16 m、yaw ±12"
-  "低位逐级升速：0.16 m、yaw ±13"
+  "开源式转速获取：0.16 m、yaw ±7、只强化角速度跟踪"
+  "开源式转速获取：0.16 m、yaw ±10、只强化角速度跟踪"
+  "开源式转速获取：0.16 m、yaw ±13、只强化角速度跟踪"
 )
-# Recover yaw authority from the real-robot-validated model_59000.pt without
-# inheriting the over-constrained yaw-7 model_60000.pt.
-STAGE_TARGETS=(59500 60500 61000 61500 62000 62500 63000 63500)
+# First acquire yaw speed from model_59000.pt. Coordinate anchoring and wheel
+# mismatch are intentionally disabled; they are handled by a later stability
+# consolidation stage after the speed capability is established.
+STAGE_TARGETS=(61000 63000 65000)
 STAGE_RUN_NAMES=(
-  spin_yawrecover_59000_longlegs_s01_yaw_6
-  spin_yawrecover_59000_longlegs_s02_yaw_7
-  spin_yawrecover_59000_longlegs_s03_yaw_8
-  spin_yawrecover_59000_longlegs_s04_yaw_9
-  spin_yawrecover_59000_longlegs_s05_yaw_10
-  spin_yawrecover_59000_longlegs_s06_yaw_11
-  spin_yawrecover_59000_longlegs_s07_yaw_12
-  spin_yawrecover_59000_longlegs_s08_yaw_13
+  spin_open_59000_longlegs_s01_yaw_7_speed
+  spin_open_59000_longlegs_s02_yaw_10_speed
+  spin_open_59000_longlegs_s03_yaw_13_speed
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -52,8 +38,8 @@ Usage:
   bash scripts/spin_curriculum.sh train-one
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 59500
-  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_59500.pt'
+  bash scripts/spin_curriculum.sh play 61000
+  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_61000.pt'
   bash scripts/spin_curriculum.sh export
 
 The first stage resumes from the real-robot-validated yaw-5 model_59000.pt. If that
@@ -66,8 +52,8 @@ Useful overrides:
   PYTHON_BIN=python
   WLG_PLAY_NUM_ENVS=20
   WLG_PLAY_HEIGHT=0.16
-  WLG_PLAY_INITIAL_YAW=5.0
-  WLG_PLAY_YAW_STEP=5.0
+  WLG_PLAY_INITIAL_YAW=7.0
+  WLG_PLAY_YAW_STEP=7.0
   WLG_EXPORT_OUT=export_onnx/longlegs_spin_final.onnx
 EOF
 }
@@ -292,16 +278,16 @@ apply_common_environment() {
   export WLG_MIXED_TERRAIN_LIN_VEL_MAX=0.0
   export WLG_MIXED_TERRAIN_YAW_MAX=0.0
 
-  # The source policy already rotates at yaw 5.  Coordinate anchoring is active
-  # from the first new update and is strengthened with each speed stage.
-  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.25
-  export WLG_SPIN_STATIONARY_POSITION_SCALE=-1.5
-  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.20
+  # Speed-acquisition phase: do not compete with the yaw tracker using custom
+  # world-position or wheel-mismatch penalties. Those are added later.
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=0.0
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=0.0
+  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
   export WLG_SPIN_STATIONARY_POSITION_DEADBAND=0.025
-  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.15
-  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.0
-  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=-0.01
-  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=-0.012
+  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=0.0
+  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=0.0
+  export WLG_SPIN_STATIONARY_ACTION_RATE_SCALE=0.0
+  export WLG_SPIN_STATIONARY_ACTION_SMOOTH_SCALE=0.0
   # Moving rotation is intentionally deferred until in-place spin is verified.
   export WLG_SPIN_MOVING_LATERAL_VEL_SCALE=0.0
   export WLG_SPIN_MOVING_WRONG_WAY_SCALE=0.0
@@ -315,112 +301,32 @@ apply_stage_environment() {
   export WLG_TERRAIN_PROPORTIONS=1.0,0.0,0.0,0.0,0.0,0.0
 
   case "${STAGE_KEYS[$stage_index]}" in
-    yaw_6_bridge)
-      export WLG_ANG_VEL_YAW_MIN=-6.0
-      export WLG_ANG_VEL_YAW_MAX=6.0
-      export WLG_SPIN_MOVING_YAW_MAX=6.0
-      export WLG_TRACKING_ANG_VEL_SCALE=3.0
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.8
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.45
-      export WLG_ENTROPY_COEF=0.0020
-      ;;
-    yaw_7_recovery)
+    yaw_7_speed)
       export WLG_ANG_VEL_YAW_MIN=-7.0
       export WLG_ANG_VEL_YAW_MAX=7.0
       export WLG_SPIN_MOVING_YAW_MAX=7.0
-      export WLG_TRACKING_ANG_VEL_SCALE=3.5
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.55
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.5
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.0
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.30
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.18
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.5
-      export WLG_ENTROPY_COEF=0.0020
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.0050
       ;;
-    yaw_8_step)
-      export WLG_ANG_VEL_YAW_MIN=-8.0
-      export WLG_ANG_VEL_YAW_MAX=8.0
-      export WLG_SPIN_MOVING_YAW_MAX=8.0
-      export WLG_TRACKING_ANG_VEL_SCALE=3.8
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.60
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.6
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.1
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.32
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.20
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.6
-      export WLG_ENTROPY_COEF=0.0020
-      ;;
-    yaw_9_step)
-      export WLG_ANG_VEL_YAW_MIN=-9.0
-      export WLG_ANG_VEL_YAW_MAX=9.0
-      export WLG_SPIN_MOVING_YAW_MAX=9.0
-      export WLG_TRACKING_ANG_VEL_SCALE=4.0
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.1
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.65
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.7
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.2
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.34
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.22
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.7
-      export WLG_ENTROPY_COEF=0.0020
-      ;;
-    yaw_10_step)
+    yaw_10_speed)
       export WLG_ANG_VEL_YAW_MIN=-10.0
       export WLG_ANG_VEL_YAW_MAX=10.0
       export WLG_SPIN_MOVING_YAW_MAX=10.0
-      export WLG_TRACKING_ANG_VEL_SCALE=4.2
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.1
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.70
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.8
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.3
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.36
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.24
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.8
-      export WLG_ENTROPY_COEF=0.0018
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.0040
       ;;
-    yaw_11_step)
-      export WLG_ANG_VEL_YAW_MIN=-11.0
-      export WLG_ANG_VEL_YAW_MAX=11.0
-      export WLG_SPIN_MOVING_YAW_MAX=11.0
-      export WLG_TRACKING_ANG_VEL_SCALE=4.4
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.2
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.75
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-1.9
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.4
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.38
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.26
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-3.9
-      export WLG_ENTROPY_COEF=0.0018
-      ;;
-    yaw_12_step)
-      export WLG_ANG_VEL_YAW_MIN=-12.0
-      export WLG_ANG_VEL_YAW_MAX=12.0
-      export WLG_SPIN_MOVING_YAW_MAX=12.0
-      export WLG_TRACKING_ANG_VEL_SCALE=4.6
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.2
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.80
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-2.0
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.5
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.40
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.28
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
-      export WLG_ENTROPY_COEF=0.0016
-      ;;
-    yaw_13_step)
+    yaw_13_speed)
       export WLG_ANG_VEL_YAW_MIN=-13.0
       export WLG_ANG_VEL_YAW_MAX=13.0
       export WLG_SPIN_MOVING_YAW_MAX=13.0
-      export WLG_TRACKING_ANG_VEL_SCALE=4.8
-      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.3
-      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.85
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-2.1
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-2.6
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.42
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.30
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.2
-      export WLG_ENTROPY_COEF=0.0015
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=1.0
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.0030
       ;;
     *)
       echo "Unknown SPIN stage: ${STAGE_KEYS[$stage_index]}" >&2
@@ -442,9 +348,8 @@ print_stage_config() {
   else
     printf '  mixed_spin: idle=10%%, in_place=45%%, moving=45%%\n'
   fi
-  printf '  XY anchor: scale=%s, deadband=%sm; wheel mismatch=%s; moving lateral=%s, wrong-way=%s\n' \
+  printf '  speed phase: XY anchor=%s, wheel mismatch=%s; moving lateral=%s, wrong-way=%s\n' \
     "$WLG_SPIN_STATIONARY_POSITION_SCALE" \
-    "$WLG_SPIN_STATIONARY_POSITION_DEADBAND" \
     "$WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE" \
     "$WLG_SPIN_MOVING_LATERAL_VEL_SCALE" \
     "$WLG_SPIN_MOVING_WRONG_WAY_SCALE"
