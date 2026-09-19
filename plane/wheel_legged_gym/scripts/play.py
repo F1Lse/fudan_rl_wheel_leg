@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import os
+import math
 import numpy as np
 
 import isaacgym
@@ -314,6 +315,10 @@ def play(args):
             if i % 50 == 0:
                 vz = env.root_states[focus_env_idx, 9].item()
                 yaw_rate = env.base_ang_vel[focus_env_idx, 2].item()
+                gx, gy, gz = env.projected_gravity[focus_env_idx].tolist()
+                roll_deg = math.degrees(math.atan2(gy, -gz))
+                pitch_deg = math.degrees(math.atan2(-gx, math.hypot(gy, gz)))
+                actual_height = env.base_height[focus_env_idx].item()
                 # left_F = env.vmc_F[0, 0].item()
                 # right_F = env.vmc_F[0, 1].item()
                 print(
@@ -321,6 +326,9 @@ def play(args):
                     f"cmd_x={env.commands[focus_env_idx, 0].item():.2f}, "
                     f"cmd_yaw={env.commands[focus_env_idx, 1].item():.3f}, "
                     f"real_yaw={yaw_rate:.3f}, "
+                    f"h_cmd={env.commands[focus_env_idx, 2].item():.3f}, "
+                    f"h_real={actual_height:.3f}, "
+                    f"roll={roll_deg:.1f}deg, pitch={pitch_deg:.1f}deg, "
                     # f"F_left={left_F:.2f}, F_right={right_F:.2f}"
                 )
             i += 1

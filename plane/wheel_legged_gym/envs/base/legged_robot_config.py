@@ -215,6 +215,8 @@ class LeggedRobotCfg(BaseConfig):
         # samples, which is safer when extending the final speed ceiling.
         # spin_fixed is for a dedicated in-place-spin policy: most samples use
         # the exact stage magnitude, with small idle and near-target groups.
+        # spin_recovery ramps the weak positive yaw direction from low speed to
+        # the stage limit while retaining the already learned negative side.
         # spin_mixed keeps a dedicated low-body/high-yaw anchor while also
         # sampling height-changing spins and combined translation/yaw. On
         # trimesh it applies separate, lower command limits away from flat.
@@ -229,6 +231,7 @@ class LeggedRobotCfg(BaseConfig):
                 "mixed_flat_highspeed",
                 "mixed_highstand_anchor",
                 "spin_fixed",
+                "spin_recovery",
                 "spin_mixed",
             },
         )

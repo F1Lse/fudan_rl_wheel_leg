@@ -7,31 +7,26 @@ LOG_ROOT="$PLANE_ROOT/logs/wheel_legged"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 PLAY_NUM_ENVS="${WLG_PLAY_NUM_ENVS:-20}"
 
-BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-59000}"
-BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_centerfix_58000_longlegs_s01_yaw_5}"
+BASE_CHECKPOINT="${WLG_SPIN_BASE_CHECKPOINT:-62000}"
+BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_open_59000_longlegs_s02_yaw_7_stability}"
 
 STAGE_KEYS=(
-  yaw_7_speed
   yaw_7_stability
   yaw_10_speed
   yaw_13_speed
 )
 STAGE_LABELS=(
-  "开源式转速获取：0.16 m、yaw ±7、只强化角速度跟踪"
-  "稳态整平：0.16 m、yaw ±7、强化水平姿态与左右轮一致性"
-  "开源式转速获取：0.16 m、yaw ±10、只强化角速度跟踪"
-  "开源式转速获取：0.16 m、yaw ±13、只强化角速度跟踪"
+  "定高整平：0.16 m、yaw ±7、强化机身水平与高度稳定"
+  "定高提速：0.16 m、yaw ±10、保持水平与高度稳定"
+  "定高提速：0.16 m、yaw ±13、保持水平与高度稳定"
 )
-# Starting from model_59000.pt, first consolidate the steady
-# posture before extending the command range again. The stability stage is
-# deliberately inserted at ±7 so it does not sacrifice the newly acquired yaw
-# authority while correcting the visible roll/pitch bias.
-STAGE_TARGETS=(61000 64000 66000 68000)
+# Branch from the previously usable model_62000.pt. The bad 64000 experiment is
+# preserved under its old run name and is deliberately not used as a source.
+STAGE_TARGETS=(64000 66000 68000)
 STAGE_RUN_NAMES=(
-  spin_open_59000_longlegs_s01_yaw_7_speed
-  spin_open_59000_longlegs_s02_yaw_7_stability
-  spin_open_59000_longlegs_s03_yaw_10_speed
-  spin_open_59000_longlegs_s04_yaw_13_speed
+  spin_level_62000_longlegs_s01_yaw_7_stability
+  spin_level_62000_longlegs_s02_yaw_10_speed
+  spin_level_62000_longlegs_s03_yaw_13_speed
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -42,14 +37,14 @@ Usage:
   bash scripts/spin_curriculum.sh train-one
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
-  bash scripts/spin_curriculum.sh play 61000
-  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_61000.pt'
+  bash scripts/spin_curriculum.sh play 64000
+  bash scripts/spin_curriculum.sh play 'logs/wheel_legged/RUN/model_64000.pt'
   bash scripts/spin_curriculum.sh export
 
-The first stage resumes from the real-robot-validated yaw-5 model_59000.pt. If that
+The first stage resumes from the previously usable yaw-7 model_62000.pt. If that
 checkpoint has a different path, provide it explicitly:
 
-  WLG_SPIN_BASE_PT=/absolute/path/model_59000.pt \
+  WLG_SPIN_BASE_PT=/absolute/path/model_62000.pt \
     bash scripts/spin_curriculum.sh train
 
 Useful overrides:
@@ -302,6 +297,26 @@ apply_common_environment() {
   export WLG_SPIN_MOVING_COMMAND_THRESHOLD=0.05
 }
 
+apply_level_environment() {
+  # Preserve the same height and posture objective as yaw is increased.
+  export WLG_RECOVERY_MODE=0
+  export WLG_FAIL_TO_TERMINAL_TIME_S=0.30
+  export WLG_BASE_HEIGHT_SCALE=3.0
+  export WLG_BASE_HEIGHT_ENHANCE_SCALE=2.0
+  export WLG_BASE_HEIGHT_L1_SCALE=-6.0
+  export WLG_LIN_VEL_Z_SCALE=-2.0
+  export WLG_ORIENTATION_SCALE=-20.0
+  export WLG_ANG_VEL_XY_SCALE=-0.25
+  export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
+  export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.25
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.20
+  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
+  export WLG_ACTION_RATE_SCALE=-0.020
+  export WLG_ACTION_SMOOTH_SCALE=-0.025
+  export WLG_ENTROPY_COEF=0.0008
+}
+
 apply_stage_environment() {
   local stage_index="$1"
   apply_common_environment
@@ -334,32 +349,22 @@ apply_stage_environment() {
       export WLG_ENTROPY_COEF=0.0015
       ;;
     yaw_7_stability)
-      # The positive direction is currently weak. Use a recovery sampler that
-      # ramps positive yaw through the whole range before showing many +7
-      # endpoints, while retaining enough negative samples to preserve -7.
-      export WLG_COMMAND_PROFILE=spin_recovery
+      # Keep the already learned ±7 range. The new branch only increases the
+      # body-level and height-stability penalties; it does not introduce a ±4
+      # detour or a wheel-speed-mismatch objective.
+      apply_level_environment
+      export WLG_COMMAND_PROFILE=independent
       export WLG_ANG_VEL_YAW_MIN=-7.0
       export WLG_ANG_VEL_YAW_MAX=7.0
       export WLG_SPIN_MOVING_YAW_MAX=7.0
       export WLG_TRACKING_ANG_VEL_SCALE=2.0
       export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.75
       export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
-      export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
-      export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
-      # The resumed policy already turns. Spend this stage on the steady
-      # attitude seen in play: stronger gravity-vector and angular-rate
-      # penalties, plus a mild differential-wheel penalty to remove yaw drift.
-      export WLG_ORIENTATION_SCALE=-10.0
-      export WLG_ANG_VEL_XY_SCALE=-0.10
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.50
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.30
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.20
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.18
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-2.5
-      export WLG_WHEEL_SUPPORT_SCALE=0.40
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
       export WLG_ENTROPY_COEF=0.0005
       ;;
     yaw_10_speed)
+      apply_level_environment
       export WLG_ANG_VEL_YAW_MIN=-10.0
       export WLG_ANG_VEL_YAW_MAX=10.0
       export WLG_SPIN_MOVING_YAW_MAX=10.0
@@ -369,16 +374,10 @@ apply_stage_environment() {
       export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
       export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.70
       export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
-      export WLG_ORIENTATION_SCALE=-6.0
-      export WLG_ANG_VEL_XY_SCALE=-0.08
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.25
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.10
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.10
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-1.0
-      export WLG_ENTROPY_COEF=0.0008
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
       ;;
     yaw_13_speed)
+      apply_level_environment
       export WLG_ANG_VEL_YAW_MIN=-13.0
       export WLG_ANG_VEL_YAW_MAX=13.0
       export WLG_SPIN_MOVING_YAW_MAX=13.0
@@ -388,14 +387,7 @@ apply_stage_environment() {
       export WLG_SPIN_FIXED_NEAR_FRACTION=0.50
       export WLG_SPIN_FIXED_NEAR_MIN_RATIO=0.75
       export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
-      export WLG_ORIENTATION_SCALE=-5.0
-      export WLG_ANG_VEL_XY_SCALE=-0.07
-      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
-      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.25
-      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=-0.08
-      export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.08
-      export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-0.80
-      export WLG_ENTROPY_COEF=0.0008
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
       ;;
     *)
       echo "Unknown SPIN stage: ${STAGE_KEYS[$stage_index]}" >&2
@@ -422,7 +414,7 @@ print_stage_config() {
   else
     printf '  mixed_spin: idle=10%%, in_place=45%%, moving=45%%\n'
   fi
-  printf '  speed phase: XY anchor=%s, wheel mismatch=%s; moving lateral=%s, wrong-way=%s\n' \
+  printf '  stability: XY anchor=%s, wheel mismatch=%s; moving lateral=%s, wrong-way=%s\n' \
     "$WLG_SPIN_STATIONARY_POSITION_SCALE" \
     "$WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE" \
     "$WLG_SPIN_MOVING_LATERAL_VEL_SCALE" \
@@ -430,6 +422,9 @@ print_stage_config() {
   printf '  yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
     "$WLG_TRACKING_ANG_VEL_L1_SCALE" "$WLG_CLIP_SINGLE_REWARD" \
     "$WLG_COMMAND_RESAMPLING_TIME"
+  printf '  height_l1=%s, vertical_speed=%s, orientation=%s, recovery_mode=%s\n' \
+    "${WLG_BASE_HEIGHT_L1_SCALE:-0}" "$WLG_LIN_VEL_Z_SCALE" \
+    "$WLG_ORIENTATION_SCALE" "$WLG_RECOVERY_MODE"
   printf '  target_checkpoint=%s\n' "${STAGE_TARGETS[$stage_index]}"
 }
 
@@ -467,7 +462,6 @@ train_all() {
   check_python_environment
   mkdir -p "$LOG_ROOT"
   cd "$PLANE_ROOT"
-  base_path="$(find_base_checkpoint)"
 
   for stage_index in "${!STAGE_KEYS[@]}"; do
     target="${STAGE_TARGETS[$stage_index]}"
@@ -483,7 +477,7 @@ train_all() {
     if (( source_iter < 0 )); then
       if (( stage_index == 0 )); then
         source_iter="$BASE_CHECKPOINT"
-        source_path="$base_path"
+        source_path="$(find_base_checkpoint)"
       else
         IFS=$'\t' read -r source_iter source_path < <(
           latest_checkpoint_for_stage "$((stage_index - 1))"
