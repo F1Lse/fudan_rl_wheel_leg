@@ -703,11 +703,13 @@ class LeggedRobotCfgPPO(BaseConfig):
         entropy_coef = _env_float("WLG_ENTROPY_COEF", 0.01)
         num_learning_epochs = 5
         num_mini_batches = 4  # mini batch size = num_envs*nsteps / nminibatches
-        learning_rate = 1.0e-3  # 5.e-4
-        schedule = "adaptive"  # could be adaptive, fixed
+        learning_rate = _env_float("WLG_LEARNING_RATE", 1.0e-3)
+        schedule = _env_choice(
+            "WLG_PPO_SCHEDULE", "adaptive", ("adaptive", "fixed")
+        )
         gamma = 0.99
         lam = 0.95
-        desired_kl = 0.005
+        desired_kl = _env_float("WLG_DESIRED_KL", 0.005)
         max_grad_norm = 1.0
 
         extra_learning_rate = 1e-3

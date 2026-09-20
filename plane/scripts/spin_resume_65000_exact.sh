@@ -14,6 +14,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/spin_resume_65000_exact.sh train <path/to/model_65000.pt> [additional_iterations]
+  bash scripts/spin_resume_65000_exact.sh train13 <path/to/model_65000.pt>
   bash scripts/spin_resume_65000_exact.sh play  <path/to/checkpoint.pt>
 
 The default continuation is 1000 additional iterations.  Set
@@ -26,6 +27,25 @@ resolve_path() {
   [[ "$path" == /* ]] || path="$PLANE_ROOT/$path"
   [[ -f "$path" ]] || { echo "Checkpoint not found: $path" >&2; exit 1; }
   printf '%s\n' "$path"
+}
+
+latest_stage_checkpoint() {
+  local run_name="$1" iter="$2" path dir best="" best_mtime=-1 mtime
+  while IFS= read -r -d '' path; do
+    dir="$(basename "$(dirname "$path")")"
+    [[ "$dir" == *_"$run_name" ]] || continue
+    mtime="$(stat -c %Y "$path")"
+    if (( mtime > best_mtime )); then
+      best_mtime="$mtime"
+      best="$path"
+    fi
+  done < <(find "$PLANE_ROOT/logs/wheel_legged" -mindepth 2 -maxdepth 2 \
+    -type f -name "model_${iter}.pt" -print0)
+  [[ -n "$best" ]] || {
+    echo "Could not find model_${iter}.pt for run ${run_name}" >&2
+    exit 1
+  }
+  printf '%s\n' "$best"
 }
 
 apply_exact_s02_environment() {
@@ -149,6 +169,58 @@ train() {
     --max_iterations="$additional"
 }
 
+train13() {
+  local source_path="$(resolve_path "$1")"
+  local source_file="$(basename "$source_path")"
+  local source_run="$(basename "$(dirname "$source_path")")"
+  local source_iter=65000 target remaining yaw stage_run source_path_next
+  local -a yaws=(10.5 11.0 12.0 13.0)
+  local -a targets=(65500 66000 66500 67000)
+  local -a runs=(
+    spin_resume_65000_yaw_10p5_bridge
+    spin_resume_65000_yaw_11_bridge
+    spin_resume_65000_yaw_12_bridge
+    spin_resume_65000_yaw_13_final
+  )
+  [[ "$source_file" == model_65000.pt ]] || {
+    echo "The source must be model_65000.pt, got: $source_file" >&2
+    exit 2
+  }
+
+  # The 65000 policy is already good.  Use small, fixed updates and reset Adam
+  # at every bridge so a lucky 65000 basin is not destroyed by old momentum.
+  export WLG_RESUME_LOAD_OPTIMIZER=0
+  export WLG_LEARNING_RATE=1e-4
+  export WLG_PPO_SCHEDULE=fixed
+  export WLG_DESIRED_KL=0.002
+
+  for stage in "${!yaws[@]}"; do
+    yaw="${yaws[$stage]}"
+    target="${targets[$stage]}"
+    stage_run="${runs[$stage]}"
+    apply_exact_s02_environment
+    export WLG_ANG_VEL_YAW_MIN="-${yaw}"
+    export WLG_ANG_VEL_YAW_MAX="${yaw}"
+    export WLG_SPIN_MOVING_YAW_MAX="${yaw}"
+    remaining="$((target - source_iter))"
+    echo
+    echo "[$((stage + 1))/4] source=$source_run/model_${source_iter}.pt"
+    echo "yaw=[-${yaw},${yaw}], target=model_${target}.pt, lr=${WLG_LEARNING_RATE}"
+    "$PYTHON_BIN" wheel_legged_gym/scripts/train.py \
+      --task=wheel_legged \
+      --experiment_name=wheel_legged \
+      --run_name="$stage_run" \
+      --resume \
+      --load_run="$source_run" \
+      --checkpoint="$source_iter" \
+      --headless \
+      --max_iterations="$remaining"
+    source_path_next="$(latest_stage_checkpoint "$stage_run" "$target")"
+    source_run="$(basename "$(dirname "$source_path_next")")"
+    source_iter="$target"
+  done
+}
+
 play() {
   local checkpoint="$(resolve_path "$1")"
   apply_exact_s02_environment
@@ -163,6 +235,7 @@ play() {
 
 case "${1:-}" in
   train) train "${2:?Please provide model_65000.pt}" "${3:-}" ;;
+  train13) train13 "${2:?Please provide model_65000.pt}" ;;
   play) play "${2:?Please provide a checkpoint path}" ;;
   *) usage; exit 2 ;;
 esac

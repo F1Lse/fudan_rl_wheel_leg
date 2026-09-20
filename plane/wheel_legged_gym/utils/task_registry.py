@@ -231,7 +231,13 @@ class TaskRegistry:
                 checkpoint=train_cfg.runner.checkpoint,
             )
             print(f"Loading model from: {resume_path}")
-            runner.load(resume_path)
+            # A conservative fine-tune can intentionally reset Adam state while
+            # still restoring the actor/critic weights.  Historical behavior is
+            # preserved unless the environment override is explicitly set.
+            load_optimizer = os.getenv("WLG_RESUME_LOAD_OPTIMIZER", "1").strip().lower() not in (
+                "0", "false", "no", "off"
+            )
+            runner.load(resume_path, load_optimizer=load_optimizer)
         return runner, train_cfg
 
 
