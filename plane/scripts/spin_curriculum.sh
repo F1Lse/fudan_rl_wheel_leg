@@ -13,20 +13,26 @@ BASE_RUN_NAME="${WLG_SPIN_BASE_RUN_NAME:-spin_open_59000_longlegs_s02_yaw_7_stab
 STAGE_KEYS=(
   yaw_7_stability
   yaw_10_speed
+  yaw_10_damping
+  yaw_10_balance
   yaw_13_speed
 )
 STAGE_LABELS=(
   "定高整平：0.16 m、yaw ±7、强化机身水平与高度稳定"
   "定高提速：0.16 m、yaw ±10、保持水平与高度稳定"
+  "定高减振：0.16 m、yaw ±10、抑制周期性平面偏移"
+  "定高稳态巩固：0.16 m、yaw ±10、从 68000 重新分叉"
   "定高提速：0.16 m、yaw ±13、保持水平与高度稳定"
 )
 # Branch from the previously usable model_62000.pt. The bad 64000 experiment is
 # preserved under its old run name and is deliberately not used as a source.
-STAGE_TARGETS=(64000 66000 68000)
+STAGE_TARGETS=(64000 66000 68000 70000 72000)
 STAGE_RUN_NAMES=(
   spin_level_62000_longlegs_s01_yaw_7_stability
   spin_level_62000_longlegs_s02_yaw_10_speed
-  spin_level_62000_longlegs_s03_yaw_13_speed
+  spin_level_62000_longlegs_s03_yaw_10_damping
+  spin_stable_68000_longlegs_s04_yaw_10
+  spin_balance_68000_longlegs_s05_yaw_13_speed
 )
 STAGE_COUNT="${#STAGE_KEYS[@]}"
 
@@ -35,6 +41,7 @@ usage() {
 Usage:
   bash scripts/spin_curriculum.sh train
   bash scripts/spin_curriculum.sh train-one
+  bash scripts/spin_curriculum.sh train-yaw10
   bash scripts/spin_curriculum.sh status
   bash scripts/spin_curriculum.sh play
   bash scripts/spin_curriculum.sh play 64000
@@ -158,12 +165,40 @@ latest_checkpoint_for_stage() {
   printf '%s\t%s\n' "$best_iter" "$best_path"
 }
 
+checkpoint_at_stage_target() {
+  local stage_index="$1"
+  local checkpoint_iter="${STAGE_TARGETS[$stage_index]}"
+  local run_name="${STAGE_RUN_NAMES[$stage_index]}"
+  local path dir_name mtime best_mtime=-1 best_path=""
+
+  if [[ -d "$LOG_ROOT" ]]; then
+    while IFS= read -r -d '' path; do
+      dir_name="$(basename "$(dirname "$path")")"
+      [[ "$dir_name" == *_"$run_name" ]] || continue
+      mtime="$(stat -c %Y "$path")"
+      if (( mtime > best_mtime )); then
+        best_mtime="$mtime"
+        best_path="$path"
+      fi
+    done < <(
+      find "$LOG_ROOT" -mindepth 2 -maxdepth 2 -type f \
+        -name "model_${checkpoint_iter}.pt" -print0
+    )
+  fi
+
+  [[ -n "$best_path" ]] || {
+    echo "Cannot find model_${checkpoint_iter}.pt in stage '$run_name'." >&2
+    return 1
+  }
+  printf '%s\n' "$best_path"
+}
+
 latest_checkpoint_overall() {
   local best_stage=-1 best_iter=-1 best_path=""
   local stage_index iter path
   for stage_index in "${!STAGE_KEYS[@]}"; do
     IFS=$'\t' read -r iter path < <(latest_checkpoint_for_stage "$stage_index")
-    if (( iter > best_iter )); then
+    if (( iter >= 0 && iter >= best_iter )); then
       best_stage="$stage_index"
       best_iter="$iter"
       best_path="$path"
@@ -309,11 +344,13 @@ apply_level_environment() {
   export WLG_ANG_VEL_XY_SCALE=-0.25
   export WLG_SPIN_STATIONARY_ORIENTATION_SCALE=-4.0
   export WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE=-0.25
-  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.40
-  export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.20
+  # Damping against periodic center corrections: penalize planar velocity,
+  # position overshoot, and abrupt action reversals.
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.80
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.35
   export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
-  export WLG_ACTION_RATE_SCALE=-0.020
-  export WLG_ACTION_SMOOTH_SCALE=-0.025
+  export WLG_ACTION_RATE_SCALE=-0.040
+  export WLG_ACTION_SMOOTH_SCALE=-0.050
   export WLG_ENTROPY_COEF=0.0008
 }
 
@@ -362,6 +399,40 @@ apply_stage_environment() {
       export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
       export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
       export WLG_ENTROPY_COEF=0.0005
+      ;;
+    yaw_10_damping)
+      # Keep exactly the same ±10 command distribution and focus only on
+      # damping the periodic position-correction oscillation.
+      apply_level_environment
+      export WLG_COMMAND_PROFILE=independent
+      export WLG_ANG_VEL_YAW_MIN=-10.0
+      export WLG_ANG_VEL_YAW_MAX=10.0
+      export WLG_SPIN_MOVING_YAW_MAX=10.0
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.75
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.0003
+      ;;
+    yaw_10_balance)
+      # Resume the usable 68000 policy in a fresh run. This is a stabilization
+      # stage, not a speed-tradeoff stage: keep yaw at ±10 while retaining the
+      # full damping used by yaw_10_damping. The previous balance variant
+      # relaxed damping and produced a visibly oscillatory model_70000.pt.
+      apply_level_environment
+      export WLG_COMMAND_PROFILE=independent
+      export WLG_ANG_VEL_YAW_MIN=-10.0
+      export WLG_ANG_VEL_YAW_MAX=10.0
+      export WLG_SPIN_MOVING_YAW_MAX=10.0
+      export WLG_TRACKING_ANG_VEL_SCALE=2.0
+      export WLG_TRACKING_ANG_VEL_ENHANCE_SCALE=0.75
+      export WLG_TRACKING_ANG_VEL_L1_SCALE=-0.10
+      export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.80
+      export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.35
+      export WLG_ACTION_RATE_SCALE=-0.040
+      export WLG_ACTION_SMOOTH_SCALE=-0.050
+      export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
+      export WLG_ENTROPY_COEF=0.0003
       ;;
     yaw_10_speed)
       apply_level_environment
@@ -419,9 +490,13 @@ print_stage_config() {
     "$WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE" \
     "$WLG_SPIN_MOVING_LATERAL_VEL_SCALE" \
     "$WLG_SPIN_MOVING_WRONG_WAY_SCALE"
-  printf '  yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
+  printf '  yaw_tracking=%s, yaw_enhance=%s, yaw_l1=%s, reward_clip=%s, resampling=%ss\n' \
+    "$WLG_TRACKING_ANG_VEL_SCALE" "$WLG_TRACKING_ANG_VEL_ENHANCE_SCALE" \
     "$WLG_TRACKING_ANG_VEL_L1_SCALE" "$WLG_CLIP_SINGLE_REWARD" \
     "$WLG_COMMAND_RESAMPLING_TIME"
+  printf '  xy_speed_penalty=%s, xy_position_penalty=%s, action_rate=%s, action_smooth=%s\n' \
+    "$WLG_SPIN_STATIONARY_LIN_VEL_SCALE" "$WLG_SPIN_STATIONARY_POSITION_SCALE" \
+    "$WLG_ACTION_RATE_SCALE" "$WLG_ACTION_SMOOTH_SCALE"
   printf '  height_l1=%s, vertical_speed=%s, orientation=%s, recovery_mode=%s\n' \
     "${WLG_BASE_HEIGHT_L1_SCALE:-0}" "$WLG_LIN_VEL_Z_SCALE" \
     "$WLG_ORIENTATION_SCALE" "$WLG_RECOVERY_MODE"
@@ -459,16 +534,25 @@ check_python_environment() {
 
 train_all() {
   local base_path stage_index target iter path source_iter source_path remaining source_run
+  local start_stage="${WLG_SPIN_START_STAGE:-0}"
   check_python_environment
   mkdir -p "$LOG_ROOT"
   cd "$PLANE_ROOT"
 
   for stage_index in "${!STAGE_KEYS[@]}"; do
+    if (( stage_index < start_stage )); then
+      continue
+    fi
     target="${STAGE_TARGETS[$stage_index]}"
     IFS=$'\t' read -r iter path < <(latest_checkpoint_for_stage "$stage_index")
     if (( iter >= target )); then
       echo "[skip] ${STAGE_LABELS[$stage_index]} already reached model_${iter}.pt"
       continue
+    fi
+    if [[ "${STAGE_KEYS[$stage_index]}" == yaw_13_speed \
+      && "${WLG_SPIN_ENABLE_YAW13:-0}" != "1" ]]; then
+      echo "Yaw ±13 is paused; set WLG_SPIN_ENABLE_YAW13=1 after validating yaw ±10."
+      return 0
     fi
 
     apply_stage_environment "$stage_index"
@@ -479,12 +563,16 @@ train_all() {
         source_iter="$BASE_CHECKPOINT"
         source_path="$(find_base_checkpoint)"
       else
-        IFS=$'\t' read -r source_iter source_path < <(
-          latest_checkpoint_for_stage "$((stage_index - 1))"
-        )
-        if (( source_iter < ${STAGE_TARGETS[$((stage_index - 1))]} )); then
-          echo "Previous SPIN stage is incomplete; refusing to skip it." >&2
-          exit 1
+        source_iter="${STAGE_TARGETS[$((stage_index - 1))]}"
+        if [[ "${STAGE_KEYS[$stage_index]}" == yaw_10_balance \
+          && -n "${WLG_SPIN_68000_PT:-}" ]]; then
+          source_path="$(resolve_checkpoint_path "$WLG_SPIN_68000_PT")"
+          [[ "$(checkpoint_iter_from_path "$source_path")" == "$source_iter" ]] || {
+            echo "WLG_SPIN_68000_PT must point to model_${source_iter}.pt" >&2
+            exit 1
+          }
+        else
+          source_path="$(checkpoint_at_stage_target "$((stage_index - 1))")"
         fi
       fi
     fi
@@ -585,6 +673,7 @@ trap on_interrupt INT TERM
 case "${1:-train}" in
   train) train_all ;;
   train-one) WLG_SPIN_STOP_AFTER_STAGE=1 train_all ;;
+  train-yaw10) WLG_SPIN_START_STAGE=3 WLG_SPIN_STOP_AFTER_STAGE=1 train_all ;;
   status) show_status ;;
   play) play_checkpoint "${2:-}" ;;
   export) export_latest ;;
