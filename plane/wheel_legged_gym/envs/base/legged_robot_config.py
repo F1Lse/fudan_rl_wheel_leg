@@ -485,6 +485,15 @@ class LeggedRobotCfg(BaseConfig):
             spin_stationary_wheel_speed_mismatch = _env_float(
                 "WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE", 0.0
             )
+            # Keep the two physical leg postures mirrored during in-place
+            # rotation.  The right-side joint axes are reversed in the URDF,
+            # so physical symmetry is q_left + q_right == 0.
+            spin_stationary_leg_position_symmetry = _env_float(
+                "WLG_SPIN_STATIONARY_LEG_POSITION_SYMMETRY_SCALE", 0.0
+            )
+            spin_stationary_leg_velocity_symmetry = _env_float(
+                "WLG_SPIN_STATIONARY_LEG_VELOCITY_SYMMETRY_SCALE", 0.0
+            )
             spin_stationary_ang_vel_xy = _env_float(
                 "WLG_SPIN_STATIONARY_ANG_VEL_XY_SCALE", 0.0
             )

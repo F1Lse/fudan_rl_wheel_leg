@@ -15,6 +15,7 @@ usage() {
 Usage:
   bash scripts/spin_resume_65000_exact.sh train <path/to/model_65000.pt> [additional_iterations]
   bash scripts/spin_resume_65000_exact.sh train13 <path/to/model_65000.pt>
+  bash scripts/spin_resume_65000_exact.sh stabilize13 <path/to/model_67000.pt> [additional_iterations]
   bash scripts/spin_resume_65000_exact.sh play  <path/to/checkpoint.pt>
 
 The default continuation is 1000 additional iterations.  Set
@@ -221,9 +222,66 @@ train13() {
   done
 }
 
+stabilize13() {
+  local source_path="$(resolve_path "$1")"
+  local source_file="$(basename "$source_path")"
+  local source_run="$(basename "$(dirname "$source_path")")"
+  local additional="${2:-500}"
+  [[ "$source_file" == model_67000.pt ]] || {
+    echo "The source must be model_67000.pt, got: $source_file" >&2
+    exit 2
+  }
+  [[ "$additional" =~ ^[1-9][0-9]*$ ]] || {
+    echo "additional_iterations must be a positive integer" >&2
+    exit 2
+  }
+
+  apply_exact_s02_environment
+  export WLG_ANG_VEL_YAW_MIN=-13.0
+  export WLG_ANG_VEL_YAW_MAX=13.0
+  export WLG_SPIN_MOVING_YAW_MAX=13.0
+
+  # Preserve yaw authority and remove the asymmetric leg-pumping solution.
+  # Wheel mismatch remains disabled until the new leg-symmetry metrics prove
+  # that body motion, rather than wheel convention, caused the wobble.
+  export WLG_SPIN_STATIONARY_LEG_POSITION_SYMMETRY_SCALE=-4.0
+  export WLG_SPIN_STATIONARY_LEG_VELOCITY_SYMMETRY_SCALE=-0.05
+  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE=-0.60
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=-0.25
+  export WLG_ACTION_RATE_SCALE=-0.025
+  export WLG_ACTION_SMOOTH_SCALE=-0.030
+
+  export WLG_RESUME_LOAD_OPTIMIZER=0
+  export WLG_LEARNING_RATE=5e-5
+  export WLG_PPO_SCHEDULE=fixed
+  export WLG_DESIRED_KL=0.002
+  export WLG_ENTROPY_COEF=0.0003
+
+  cd "$PLANE_ROOT"
+  echo "Stabilizing yaw ±13 with mirrored leg posture and motion"
+  echo "source=$source_path, additional_iterations=$additional"
+  "$PYTHON_BIN" wheel_legged_gym/scripts/train.py \
+    --task=wheel_legged \
+    --experiment_name=wheel_legged \
+    --run_name=spin_yaw13_leg_symmetry_stabilization \
+    --resume \
+    --load_run="$source_run" \
+    --checkpoint=67000 \
+    --headless \
+    --max_iterations="$additional"
+}
+
 play() {
   local checkpoint="$(resolve_path "$1")"
+  local play_yaw="${WLG_PLAY_YAW_LIMIT:-${WLG_PLAY_YAW_STEP:-13.0}}"
   apply_exact_s02_environment
+  # The training snapshot was created at yaw ±10, but the staged 67000 model
+  # is meant to be validated at ±13.  Do not let the old s02 bounds clip the
+  # keyboard command before it reaches the policy.
+  export WLG_ANG_VEL_YAW_MIN="-${play_yaw}"
+  export WLG_ANG_VEL_YAW_MAX="${play_yaw}"
+  export WLG_SPIN_MOVING_YAW_MAX="${play_yaw}"
   cd "$PLANE_ROOT"
   "$PYTHON_BIN" wheel_legged_gym/scripts/play.py \
     --task=wheel_legged \
@@ -236,6 +294,7 @@ play() {
 case "${1:-}" in
   train) train "${2:?Please provide model_65000.pt}" "${3:-}" ;;
   train13) train13 "${2:?Please provide model_65000.pt}" ;;
+  stabilize13) stabilize13 "${2:?Please provide model_67000.pt}" "${3:-}" ;;
   play) play "${2:?Please provide a checkpoint path}" ;;
   *) usage; exit 2 ;;
 esac

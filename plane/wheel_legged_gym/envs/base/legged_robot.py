@@ -3027,6 +3027,32 @@ class LeggedRobot(BaseTask):
         )
         return self._spin_in_place_mask() * normalized_mismatch
 
+    def _reward_spin_stationary_leg_position_symmetry(self):
+        """Suppress asymmetric leg pumping while retaining wheel yaw authority."""
+        mirrored_error = torch.stack(
+            (
+                self.dof_pos[:, 0] + self.dof_pos[:, 3],
+                self.dof_pos[:, 1] + self.dof_pos[:, 4],
+            ),
+            dim=1,
+        )
+        return self._spin_in_place_mask() * torch.mean(
+            torch.square(mirrored_error), dim=1
+        )
+
+    def _reward_spin_stationary_leg_velocity_symmetry(self):
+        """Penalize periodic left/right leg motion about a symmetric posture."""
+        mirrored_velocity_error = torch.stack(
+            (
+                self.dof_vel[:, 0] + self.dof_vel[:, 3],
+                self.dof_vel[:, 1] + self.dof_vel[:, 4],
+            ),
+            dim=1,
+        )
+        return self._spin_in_place_mask() * torch.mean(
+            torch.square(mirrored_velocity_error), dim=1
+        )
+
     def _reward_spin_stationary_ang_vel_xy(self):
         tilt_rate = torch.abs(self.base_ang_vel[:, 0]) + torch.abs(
             self.base_ang_vel[:, 1]
