@@ -11,26 +11,28 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 # not use the newer world-position, wheel-mismatch, or strong spin-stability
 # terms.
 STAGE_YAWS=(7 10 13)
-STAGE_TARGETS=(66000 67000 68000)
+STAGE_TARGETS=(66000 67000 70000)
 STAGE_RUN_NAMES=(
   spin_open_65000_longlegs_s01_yaw_7
   spin_open_65000_longlegs_s02_yaw_10
-  spin_open_65000_longlegs_s03_yaw_13
+  spin_open_65000_longlegs_s03_yaw_13_inplace_velocity_to_70000
 )
 
 usage() {
   cat <<'EOF'
 Usage:
   bash scripts/spin_from_65000_open.sh train <path/to/model_65000.pt>
-  bash scripts/spin_from_65000_open.sh train13 <path/to/model_67000.pt>
+  bash scripts/spin_from_65000_open.sh train13 <path/to/model_67000.pt|model_67500.pt>
   bash scripts/spin_from_65000_open.sh play <path/to/model_66000.pt>
 
 The training stages are:
   model_65000.pt -> yaw ±7  -> model_66000.pt
   model_66000.pt -> yaw ±10 -> model_67000.pt
-  model_67000.pt -> yaw ±13 -> model_68000.pt
+  model_67000.pt -> yaw ±13 -> model_70000.pt
 
-Only the first two stages are recommended before physical validation.
+The default `train` command runs all three stages automatically. Set
+WLG_SPIN_STOP_AFTER_YAW10=1 if you want to stop at model_67000 for validation.
+For the final in-place stage, WLG_SPIN_INPLACE_LIN_VEL_SCALE defaults to -0.40.
 EOF
 }
 
@@ -153,8 +155,8 @@ train_course() {
     source_path="$output_path"
     source_iter="$target"
 
-    # Stop after yaw ±10 so the user can validate before the ±13 stage.
-    if (( stage == 1 )) && [[ "${WLG_SPIN_STOP_AFTER_YAW10:-1}" == "1" ]]; then
+    # Optional stop after yaw ±10 so the user can validate before the ±13 stage.
+    if (( stage == 1 )) && [[ "${WLG_SPIN_STOP_AFTER_YAW10:-0}" == "1" ]]; then
       echo "Stopped after yaw ±10. Validate this checkpoint before continuing."
       return 0
     fi
@@ -162,19 +164,38 @@ train_course() {
 }
 
 train13() {
-  local source_path source_iter source_run output_path
+  local source_path source_iter source_run output_path remaining
   source_path="$(resolve_path "$1")"
   source_iter="$(checkpoint_iter "$source_path")"
-  [[ "$source_iter" == 67000 ]] || {
-    echo "The yaw ±13 stage must start from model_67000.pt, got model_${source_iter}.pt" >&2
+  [[ "$source_iter" =~ ^[0-9]+$ ]] || {
+    echo "Invalid checkpoint iteration: $source_iter" >&2
     exit 1
   }
+  (( source_iter >= 67000 && source_iter < 70000 )) || {
+    echo "The yaw ±13 stage must start from model_67000.pt through model_69999.pt, got model_${source_iter}.pt" >&2
+    exit 1
+  }
+  remaining="$((70000 - source_iter))"
   apply_open_source_environment 13
+  # Do not force the two legs to use the same mirrored pose.  The policy needs
+  # small independent leg corrections to reject yaw/roll disturbances.
+  export WLG_SPIN_STATIONARY_LEG_POSITION_SYMMETRY_SCALE=0.0
+  export WLG_SPIN_STATIONARY_LEG_VELOCITY_SYMMETRY_SCALE=0.0
+
+  # An in-place spin means near-zero instantaneous base XY velocity.  Penalize
+  # that directly, but do not pull the robot back to a world-frame anchor; the
+  # latter produced the observed periodic leave-and-return oscillation.
+  export WLG_SPIN_STATIONARY_LIN_VEL_SCALE="${WLG_SPIN_INPLACE_LIN_VEL_SCALE:--0.40}"
+  export WLG_SPIN_STATIONARY_POSITION_SCALE=0.0
+  export WLG_SPIN_STATIONARY_WHEEL_SPEED_MISMATCH_SCALE=0.0
   source_run="$(basename "$(dirname "$source_path")")"
   cd "$PLANE_ROOT"
   echo "Open-source SPIN stage 3/3: yaw ±13"
   echo "source=$source_path"
-  echo "target=model_68000.pt"
+  echo "target=model_70000.pt, remaining_iterations=$remaining"
+  echo "instantaneous planar-velocity penalty=${WLG_SPIN_STATIONARY_LIN_VEL_SCALE}"
+  echo "world-position penalty=${WLG_SPIN_STATIONARY_POSITION_SCALE}"
+  echo "leg symmetry penalties=${WLG_SPIN_STATIONARY_LEG_POSITION_SYMMETRY_SCALE},${WLG_SPIN_STATIONARY_LEG_VELOCITY_SYMMETRY_SCALE}"
   "$PYTHON_BIN" wheel_legged_gym/scripts/train.py \
     --task=wheel_legged \
     --experiment_name=wheel_legged \
@@ -183,10 +204,10 @@ train13() {
     --load_run="$source_run" \
     --checkpoint="$source_iter" \
     --headless \
-    --max_iterations=1000
-  output_path="$(latest_stage_checkpoint "${STAGE_RUN_NAMES[2]}" 68000 || true)"
+    --max_iterations="$remaining"
+  output_path="$(latest_stage_checkpoint "${STAGE_RUN_NAMES[2]}" 70000 || true)"
   [[ -n "$output_path" ]] || {
-    echo "Stage did not produce model_68000.pt." >&2
+    echo "Stage did not produce model_70000.pt." >&2
     exit 1
   }
   echo "Generated $output_path"

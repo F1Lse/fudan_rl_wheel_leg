@@ -155,6 +155,9 @@ mujoco/python_tools/*tuixiong*.py
 **/logs/**/model_*.ckpt
 **/logs/**/checkpoint_*.ckpt
 
+# 本地批量评测结果（需要共享时可单独复制 summary/CSV）
+plane/evaluations/
+
 # ==================================================
 # 以下内容没有被忽略，会正常保存：
 #
