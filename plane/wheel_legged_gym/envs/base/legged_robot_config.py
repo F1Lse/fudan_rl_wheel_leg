@@ -77,6 +77,23 @@ def _env_choice(name, default, choices):
 
 
 _HISTORICAL_DOMAIN_RAND = _env_bool("WLG_HISTORICAL_DOMAIN_RAND", False)
+_DOMAIN_SCALE = _env_float(
+    "WLG_DOMAIN_SCALE", 1.0 if _HISTORICAL_DOMAIN_RAND else 0.0
+)
+if not 0.0 <= _DOMAIN_SCALE <= 1.0:
+    raise ValueError("WLG_DOMAIN_SCALE must be in [0, 1]")
+
+
+def _domain_range(nominal, historical):
+    """Interpolate dynamics ranges without changing either old endpoint."""
+    if _DOMAIN_SCALE == 0.0:
+        return nominal
+    if _DOMAIN_SCALE == 1.0:
+        return historical
+    return [
+        start + _DOMAIN_SCALE * (end - start)
+        for start, end in zip(nominal, historical)
+    ]
 
 
 class LeggedRobotCfg(BaseConfig):
@@ -277,6 +294,9 @@ class LeggedRobotCfg(BaseConfig):
         spin_fixed_near_fraction = _env_float(
             "WLG_SPIN_FIXED_NEAR_FRACTION", 0.10
         )
+        spin_fixed_positive_fraction = _env_float(
+            "WLG_SPIN_FIXED_POSITIVE_FRACTION", 0.50
+        )
         spin_fixed_near_min_ratio = _env_float(
             "WLG_SPIN_FIXED_NEAR_MIN_RATIO", 0.90
         )
@@ -365,42 +385,37 @@ class LeggedRobotCfg(BaseConfig):
 
     class domain_rand:
         randomize_friction = True
-        friction_range = [0.1, 2.0] if _HISTORICAL_DOMAIN_RAND else [0.6, 1.4]
+        friction_range = _domain_range([0.6, 1.4], [0.1, 2.0])
         randomize_restitution = True
-        restitution_range = [0.0, 1.0] if _HISTORICAL_DOMAIN_RAND else [0.6, 1.0]
+        restitution_range = _env_float_list(
+            "WLG_RESTITUTION_RANGE", _domain_range([0.6, 1.0], [0.0, 1.0])
+        )
+        if not 0.0 <= restitution_range[0] <= restitution_range[1] <= 1.0:
+            raise ValueError("WLG_RESTITUTION_RANGE must be ordered values in [0, 1]")
         randomize_base_mass = True
-        added_mass_range = [-2.0, 3.0] if _HISTORICAL_DOMAIN_RAND else [-1.0, 2.0]
+        added_mass_range = _domain_range([-1.0, 2.0], [-2.0, 3.0])
         randomize_inertia = True
-        randomize_inertia_range = (
-            [0.8, 1.2] if _HISTORICAL_DOMAIN_RAND else [0.9, 1.1]
-        )
+        randomize_inertia_range = _domain_range([0.9, 1.1], [0.8, 1.2])
         randomize_base_com = True
-        rand_com_vec = (
-            [0.05, 0.05, 0.05]
-            if _HISTORICAL_DOMAIN_RAND
-            else [0.02, 0.02, 0.02]
-        )
-        push_robots = _HISTORICAL_DOMAIN_RAND
+        rand_com_vec = _domain_range([0.02] * 3, [0.05] * 3)
+        push_robots = _env_bool("WLG_PUSH_ROBOTS", _HISTORICAL_DOMAIN_RAND)
         push_interval_s = 7
-        max_push_vel_xy = 2.0
+        max_push_vel_xy = _env_float("WLG_PUSH_MAX_VEL_XY", 2.0)
         randomize_Kp = True
-        randomize_Kp_range = (
-            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
-        )
+        randomize_Kp_range = _domain_range([0.95, 1.05], [0.9, 1.1])
         randomize_Kd = True
-        randomize_Kd_range = (
-            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
-        )
+        randomize_Kd_range = _domain_range([0.95, 1.05], [0.9, 1.1])
         randomize_motor_torque = True
-        randomize_motor_torque_range = (
-            [0.9, 1.1] if _HISTORICAL_DOMAIN_RAND else [0.95, 1.05]
-        )
+        randomize_motor_torque_range = _domain_range([0.95, 1.05], [0.9, 1.1])
         randomize_default_dof_pos = True
-        randomize_default_dof_pos_range = (
-            [-0.05, 0.05] if _HISTORICAL_DOMAIN_RAND else [-0.03, 0.03]
+        randomize_default_dof_pos_range = _domain_range(
+            [-0.03, 0.03], [-0.05, 0.05]
         )
-        randomize_action_delay = _HISTORICAL_DOMAIN_RAND
-        delay_ms_range = [0, 10]
+        randomize_action_delay = _DOMAIN_SCALE > 0.0
+        delay_ms_range = (
+            [0, 10] if _DOMAIN_SCALE == 0.0
+            else [0, round(10 * _DOMAIN_SCALE)]
+        )
 
     class rewards:
         class scales:
@@ -710,6 +725,12 @@ class LeggedRobotCfgPPO(BaseConfig):
         use_clipped_value_loss = True
         clip_param = 0.2
         entropy_coef = _env_float("WLG_ENTROPY_COEF", 0.01)
+        spin_guard_coef = _env_float("WLG_SPIN_GUARD_COEF", 0.0)
+        spin_guard_scope = _env_choice(
+            "WLG_SPIN_GUARD_SCOPE", "nonpositive", ("nonpositive", "nonnegative", "all", "inside")
+        )
+        spin_guard_yaw_limit = _env_float("WLG_SPIN_GUARD_YAW_LIMIT", 5.0)
+        spin_guard_yaw_scale = LeggedRobotCfg.normalization.obs_scales.ang_vel
         num_learning_epochs = 5
         num_mini_batches = 4  # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = _env_float("WLG_LEARNING_RATE", 1.0e-3)

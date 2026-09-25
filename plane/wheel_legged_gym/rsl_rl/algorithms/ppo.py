@@ -6,6 +6,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from copy import deepcopy
 
 from wheel_legged_gym.rsl_rl.modules import ActorCritic
 from wheel_legged_gym.rsl_rl.storage import RolloutStorage
@@ -31,6 +32,10 @@ class PPO:
         schedule="fixed",
         desired_kl=0.01,
         kl_decay=0,
+        spin_guard_coef=0.0,
+        spin_guard_scope="nonpositive",
+        spin_guard_yaw_limit=5.0,
+        spin_guard_yaw_scale=0.25,
         device="cpu",
     ):
         self.device = device
@@ -39,6 +44,19 @@ class PPO:
         self.kl_decay = max(kl_decay, 0)
         self.schedule = schedule
         self.learning_rate = learning_rate
+        self.spin_guard_coef = float(spin_guard_coef)
+        if self.spin_guard_coef < 0:
+            raise ValueError("spin_guard_coef must be nonnegative")
+        if spin_guard_scope not in ("nonpositive", "nonnegative", "all", "inside"):
+            raise ValueError("spin_guard_scope must be nonpositive, nonnegative, all, or inside")
+        self.spin_guard_scope = spin_guard_scope
+        self.spin_guard_obs_yaw_limit = (
+            float(spin_guard_yaw_limit) * float(spin_guard_yaw_scale)
+        )
+        if self.spin_guard_obs_yaw_limit < 0:
+            raise ValueError("spin_guard_yaw_limit and scale must be nonnegative")
+        self.spin_guard_teacher = None
+        self.last_spin_guard_loss = 0.0
 
         # PPO components
         self.actor_critic = actor_critic
@@ -72,6 +90,15 @@ class PPO:
         self.lam = lam
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
+
+    def snapshot_spin_guard_teacher(self):
+        """Freeze the loaded source policy for on-policy retention distillation."""
+        if self.spin_guard_coef == 0:
+            return
+        if not self.actor_critic.is_sequence:
+            raise ValueError("Spin guard requires ActorCriticSequence")
+        self.spin_guard_teacher = deepcopy(self.actor_critic).eval()
+        self.spin_guard_teacher.requires_grad_(False)
 
     def init_storage(
         self,
@@ -148,6 +175,7 @@ class PPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_kl = 0
+        mean_spin_guard_loss = 0.0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(
                 self.num_mini_batches, self.num_learning_epochs
@@ -240,6 +268,34 @@ class PPO:
                 + self.value_loss_coef * value_loss
                 - self.entropy_coef * entropy_batch.mean()
             )
+            if self.spin_guard_coef:
+                if self.spin_guard_teacher is None:
+                    raise RuntimeError("Spin guard teacher was not captured after loading")
+                if obs_batch.shape[-1] != 25:
+                    raise ValueError("Spin guard expects the 25-D wheel-legged observation")
+                # Observation layout: angular velocity [0:3], gravity [3:6],
+                # commands [6:9]. Selectively retain the source policy where
+                # its behavior should remain stable during adaptation.
+                if self.spin_guard_scope == "nonpositive":
+                    guard_mask = obs_batch[:, 7] <= 0.0
+                elif self.spin_guard_scope == "nonnegative":
+                    guard_mask = obs_batch[:, 7] >= 0.0
+                elif self.spin_guard_scope == "inside":
+                    guard_mask = (
+                        obs_batch[:, 7].abs() <= self.spin_guard_obs_yaw_limit
+                    )
+                else:
+                    guard_mask = torch.ones_like(obs_batch[:, 7], dtype=torch.bool)
+                if guard_mask.any():
+                    with torch.no_grad():
+                        teacher_mu, _ = self.spin_guard_teacher.act_inference(
+                            obs_batch[guard_mask], obs_history_batch[guard_mask]
+                        )
+                    guard_loss = (
+                        mu_batch[guard_mask] - teacher_mu
+                    ).square().mean()
+                    loss = loss + self.spin_guard_coef * guard_loss
+                    mean_spin_guard_loss += guard_loss.item()
 
             # Gradient step
             self.optimizer.zero_grad()
@@ -288,6 +344,7 @@ class PPO:
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_kl /= num_updates
+        self.last_spin_guard_loss = mean_spin_guard_loss / num_updates
         if num_updates_extra > 0:
             mean_extra_loss /= num_updates_extra
         self.storage.clear()

@@ -4,6 +4,7 @@
 import os
 import math
 import numpy as np
+from play_hud import AMBER, CYAN, GREEN, RED, build_hud_lines
 
 import isaacgym
 from isaacgym import gymtorch
@@ -26,9 +27,24 @@ except ImportError:
 cmd_x = float(os.getenv("WLG_PLAY_INITIAL_LIN_VEL", "0.0"))
 ang_vel = float(os.getenv("WLG_PLAY_INITIAL_YAW", "0.0"))
 cmd_height = float(os.getenv("WLG_PLAY_HEIGHT", "0.20"))
+PLAY_YAW_RAMP_S = float(os.getenv("WLG_PLAY_YAW_RAMP_S", "0.0"))
+if not math.isfinite(PLAY_YAW_RAMP_S) or PLAY_YAW_RAMP_S < 0:
+    raise ValueError("WLG_PLAY_YAW_RAMP_S must be finite and nonnegative")
+applied_yaw = 0.0
+ramp_start_yaw = 0.0
+ramp_target_yaw = 0.0
+ramp_elapsed_s = 0.0
 running = True
 turn_left_pressed = False
 turn_right_pressed = False
+hud_enabled = os.getenv("WLG_PLAY_HUD", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+hud_toggle_pressed = False
+HUD_UPDATE_STEPS = 5
+HUD_CAMERA_OFFSET = np.array([-5.0, -6.0, 3.5], dtype=np.float32)
+HUD_RIGHT = np.array([6.0, -5.0, 0.0], dtype=np.float32)
+HUD_RIGHT /= np.linalg.norm(HUD_RIGHT)
 
 LIN_VEL_CMD = float(os.getenv("WLG_PLAY_LIN_VEL_CMD", "0.5"))
 YAW_STEP = float(os.getenv("WLG_PLAY_YAW_STEP", "1.0"))
@@ -61,6 +77,7 @@ def update_yaw_cmd():
 def on_press(key):
     global cmd_x, ang_vel, cmd_height, running
     global turn_left_pressed, turn_right_pressed
+    global hud_enabled, hud_toggle_pressed
 
     if key == keyboard.Key.esc:
         running = False
@@ -104,10 +121,14 @@ def on_press(key):
     elif k == "c":
         cmd_height -= HEIGHT_STEP
         print(f"[CMD] height down: h={cmd_height:.2f}")
+    elif k == "h" and not hud_toggle_pressed:
+        hud_toggle_pressed = True
+        hud_enabled = not hud_enabled
+        print(f"[HUD] {'on' if hud_enabled else 'off'}")
 
 
 def on_release(key):
-    global turn_left_pressed, turn_right_pressed
+    global turn_left_pressed, turn_right_pressed, hud_toggle_pressed
     try:
         k = key.char.lower()
     except Exception:
@@ -119,11 +140,14 @@ def on_release(key):
     elif k == "d":
         turn_right_pressed = False
         update_yaw_cmd()
+    elif k == "h":
+        hud_toggle_pressed = False
     return
 
 
-def apply_manual_commands(env, env_cfg):
+def apply_manual_commands(env, env_cfg, advance_yaw=True):
     global cmd_x, ang_vel, cmd_height
+    global applied_yaw, ramp_start_yaw, ramp_target_yaw, ramp_elapsed_s
 
     cmd_x = float(
         np.clip(
@@ -147,12 +171,27 @@ def apply_manual_commands(env, env_cfg):
         )
     )
 
+    if PLAY_YAW_RAMP_S == 0.0:
+        applied_yaw = ang_vel
+        ramp_target_yaw = ang_vel
+    else:
+        if ang_vel != ramp_target_yaw:
+            ramp_start_yaw = applied_yaw
+            ramp_target_yaw = ang_vel
+            ramp_elapsed_s = 0.0
+        if advance_yaw:
+            ramp_elapsed_s = min(ramp_elapsed_s + env.dt, PLAY_YAW_RAMP_S)
+            fraction = ramp_elapsed_s / PLAY_YAW_RAMP_S
+            applied_yaw = (
+                ramp_start_yaw + (ramp_target_yaw - ramp_start_yaw) * fraction
+            )
+
     env.commands[:, 2] = cmd_height
 
     jump_ids = getattr(env, "jump_ramp_idx", None)
     if jump_ids is None or len(jump_ids) == 0:
         env.commands[:, 0] = cmd_x
-        env.commands[:, 1] = ang_vel
+        env.commands[:, 1] = applied_yaw
         return
 
     manual_mask = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
@@ -160,7 +199,7 @@ def apply_manual_commands(env, env_cfg):
     manual_ids = manual_mask.nonzero(as_tuple=False).flatten()
     if len(manual_ids) != 0:
         env.commands[manual_ids, 0] = cmd_x
-        env.commands[manual_ids, 1] = ang_vel
+        env.commands[manual_ids, 1] = applied_yaw
 
     env.commands[jump_ids, 0] = env_cfg.commands.jump_ramp_lin_vel_x
     env.commands[jump_ids, 2] = env_cfg.commands.jump_ramp_height
@@ -205,6 +244,64 @@ def update_follow_camera(env, env_idx):
     env.set_camera(camera_position, camera_look_at)
 
 
+def _status_color(value, good, caution):
+    if value <= good:
+        return GREEN
+    return AMBER if value <= caution else RED
+
+
+def draw_play_hud(env, env_idx, left_wheel_idx, right_wheel_idx):
+    """Draw live metrics beside the focused robot in the Isaac Gym viewer."""
+    robot_position = env.root_states[env_idx, :3].detach().cpu().numpy()
+    env_origin = env.env_origins[env_idx].detach().cpu().numpy()
+    camera_target = robot_position + HUD_RIGHT * 1.8 + np.array(
+        [0.0, 0.0, 1.35], dtype=np.float32
+    )
+    env.set_camera((camera_target + HUD_CAMERA_OFFSET).tolist(), camera_target.tolist())
+
+    commanded_yaw = env.commands[env_idx, 1].item()
+    actual_yaw = env.base_ang_vel[env_idx, 2].item()
+    tilt_deg = math.degrees(math.acos(float(np.clip(
+        -env.projected_gravity[env_idx, 2].item(), -1.0, 1.0
+    ))))
+    rp_rate = torch.norm(env.base_ang_vel[env_idx, :2]).item()
+    wheel_speed = env.dof_vel[env_idx, [left_wheel_idx, right_wheel_idx]].tolist()
+    wheel_speed_limit = env.dof_vel_limits[[left_wheel_idx, right_wheel_idx]].tolist()
+    wheel_torque = env.torques[env_idx, [left_wheel_idx, right_wheel_idx]].tolist()
+    wheel_limit = env.torque_limits[[left_wheel_idx, right_wheel_idx]].tolist()
+    speed_fraction = [
+        abs(speed) / max(limit, 1e-6)
+        for speed, limit in zip(wheel_speed, wheel_speed_limit)
+    ]
+    torque_fraction = [
+        abs(torque) / max(limit, 1e-6)
+        for torque, limit in zip(wheel_torque, wheel_limit)
+    ]
+
+    rows = [
+        ("SET", f"{ang_vel:+.2f} RAD/S", CYAN),
+        ("CMD", f"{commanded_yaw:+.2f} RAD/S", CYAN),
+        ("YAW", f"{actual_yaw:+.2f} RAD/S", GREEN),
+        ("ERR", f"{abs(commanded_yaw - actual_yaw):.2f} RAD/S",
+         _status_color(abs(commanded_yaw - actual_yaw), 0.8, 1.5)),
+        ("TILT", f"{tilt_deg:.1f} DEG", _status_color(tilt_deg, 5.0, 12.0)),
+        ("RP", f"{rp_rate:.2f} RAD/S", _status_color(rp_rate, 0.5, 1.0)),
+        ("WL", f"{wheel_speed[0]:+.1f}/{wheel_speed_limit[0]:.1f}",
+         _status_color(speed_fraction[0], 0.7, 0.9)),
+        ("WR", f"{wheel_speed[1]:+.1f}/{wheel_speed_limit[1]:.1f}",
+         _status_color(speed_fraction[1], 0.7, 0.9)),
+        ("TL", f"{abs(wheel_torque[0]):.1f}/{wheel_limit[0]:.1f} NM",
+         _status_color(torque_fraction[0], 0.7, 0.9)),
+        ("TR", f"{abs(wheel_torque[1]):.1f}/{wheel_limit[1]:.1f} NM",
+         _status_color(torque_fraction[1], 0.7, 0.9)),
+    ]
+    panel_origin = robot_position - env_origin + HUD_RIGHT * 0.95
+    panel_origin[2] += 0.35
+    vertices, colors = build_hud_lines(panel_origin, HUD_RIGHT, rows)
+    env.gym.clear_lines(env.viewer)
+    env.gym.add_lines(env.viewer, env.envs[env_idx], len(colors), vertices, colors)
+
+
 def play(args):
     global running
 
@@ -216,9 +313,12 @@ def play(args):
     print("e      : stop")
     print("x      : height up")
     print("c      : height down")
+    print("h      : toggle live HUD")
     print("q/ESC  : quit")
-    print("camera : fixed overview")
+    print("camera : HUD follow view" if hud_enabled else "camera : fixed overview")
     print(f"initial command: vx={cmd_x:.2f}, yaw={ang_vel:.2f}, h={cmd_height:.2f}")
+    print(f"yaw command ramp: {PLAY_YAW_RAMP_S:.2f} s")
+    print(f"live HUD: {'on' if hud_enabled else 'off'}")
     print("=============================================\n")
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
@@ -273,13 +373,21 @@ def play(args):
         focus_env_idx = int(custom_ids[0].item())
         print(f"[PLAY] focusing {focus_terrain} env: {focus_env_idx}")
 
-    if getattr(env, "viewer", None) is not None:
+    if getattr(env, "viewer", None) is not None and not hud_enabled:
         if has_selected_focus:
             update_follow_camera(env, focus_env_idx)
         else:
             env.set_camera(INITIAL_CAMERA_POSITION, INITIAL_CAMERA_LOOK_AT)
 
-    apply_manual_commands(env, env_cfg)
+    wheel_indices = env.wheel_dof_indices.tolist()
+    left_wheel_idx = next(
+        index for index in wheel_indices if env.dof_names[index].lower().startswith("l")
+    )
+    right_wheel_idx = next(
+        index for index in wheel_indices if env.dof_names[index].lower().startswith("r")
+    )
+
+    apply_manual_commands(env, env_cfg, advance_yaw=False)
     obs, obs_history = env.get_observations()
 
     train_cfg.runner.resume = True
@@ -301,16 +409,25 @@ def play(args):
         print("Exported policy to:", path)
 
     i = 0
+    hud_was_drawn = False
     try:
         while running and i < 100000:
-            apply_manual_commands(env, env_cfg)
+            apply_manual_commands(env, env_cfg, advance_yaw=True)
             if is_sequence_policy:
                 actions, _ = policy(obs, obs_history)
             else:
                 actions = policy(obs)
 
             obs, _, _, _, _, obs_history = env.step(actions)
-            apply_manual_commands(env, env_cfg)
+            apply_manual_commands(env, env_cfg, advance_yaw=False)
+
+            if getattr(env, "viewer", None) is not None:
+                if hud_enabled and (i % HUD_UPDATE_STEPS == 0 or not hud_was_drawn):
+                    draw_play_hud(env, focus_env_idx, left_wheel_idx, right_wheel_idx)
+                    hud_was_drawn = True
+                elif not hud_enabled and hud_was_drawn:
+                    env.gym.clear_lines(env.viewer)
+                    hud_was_drawn = False
 
             if i % 50 == 0:
                 vz = env.root_states[focus_env_idx, 9].item()

@@ -5,12 +5,14 @@
   "yaw_commands_radps": [7.0, -7.0, 10.0, -10.0],
   "height_m": 0.16,
   "episode_seconds": 8.0,
+  "warmup_seconds": 0.0,
   "episodes_per_yaw": 20,
   "trace_seconds": 2.0,
   "max_traces": 12,
   "stable_thresholds": {
     "yaw_mae_radps": 1.0,
     "max_drift_m": 0.15,
-    "max_tilt_deg": 15.0
+    "max_tilt_deg": 15.0,
+    "rms_roll_pitch_rate_radps": 1.0
   }
 }

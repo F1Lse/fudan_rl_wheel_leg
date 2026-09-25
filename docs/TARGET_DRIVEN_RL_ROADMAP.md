@@ -6,6 +6,8 @@
 
 目标工作流应变为：**自然语言目标 → 可测的任务规格 → 固定评测 → 失败轨迹 → 有针对性的采样或模型改造 → 同一评测复验**。训练轮数是预算，不是成功指标。
 
+2026-09-25 已用最新 `model_70000.pt` 验证第一步，详见 [高速旋转诊断](SPIN_MODEL_70000_AUDIT.md)：策略在 ±4 rad/s 附近能跟踪，但 6–8 rad/s 出现明显断点，正向更弱；扰动尤其是推搡会放大机身晃动。因此当前优先事项是**按转速和方向收集失败数据、调整命令采样、验证非饱和 yaw 奖励**，而不是先扩大网络或增加训练轮次。
+
 ## 代码现状与能力边界
 
 - `plane/wheel_legged_gym/envs/base/legged_robot_config.py` 中 actor 每步观测为 25 维，历史长度为 5，编码潜变量为 3 维。`compute_proprioception_observations()` 不包含前方地形；测得的高度进入 privileged observation，供 critic 使用。

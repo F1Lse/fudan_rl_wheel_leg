@@ -430,6 +430,10 @@ class OnPolicyRunner:
         self.writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, locs["it"])
         self.writer.add_scalar("Policy/mean_noise_std", mean_std.item(), locs["it"])
         self.writer.add_scalar("Policy/mean_kl", locs["mean_kl"], locs["it"])
+        if self.alg.spin_guard_coef:
+            self.writer.add_scalar(
+                "Loss/spin_guard", self.alg.last_spin_guard_loss, locs["it"]
+            )
         self.writer.add_scalar("Perf/total_fps", fps, locs["it"])
         self.writer.add_scalar(
             "Perf/collection time", locs["collection_time"], locs["it"]
@@ -499,6 +503,7 @@ class OnPolicyRunner:
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict["model_state_dict"])
+        self.alg.snapshot_spin_guard_teacher()
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
         self.current_learning_iteration = loaded_dict["iter"]

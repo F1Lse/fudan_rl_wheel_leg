@@ -1,0 +1,18 @@
+{
+  "id": "spin_retention_v1",
+  "task": "spin_stability",
+  "goal": "Check positive spin while retaining negative spin and idle balance",
+  "yaw_commands_radps": [-5.0, 0.0, 5.0],
+  "height_m": 0.16,
+  "episode_seconds": 8.0,
+  "warmup_seconds": 2.0,
+  "episodes_per_yaw": 20,
+  "trace_seconds": 2.0,
+  "max_traces": 12,
+  "stable_thresholds": {
+    "yaw_mae_radps": 0.8,
+    "max_drift_m": 0.15,
+    "max_tilt_deg": 15.0,
+    "rms_roll_pitch_rate_radps": 0.5
+  }
+}
