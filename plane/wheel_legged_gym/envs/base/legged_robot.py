@@ -109,6 +109,12 @@ class LeggedRobot(BaseTask):
             )
             if self.cfg.domain_rand.push_robots:
                 self._push_robots()
+            # Refresh body poses from the previous substep, then apply the
+            # physical gas-spring force before advancing the simulator.  This
+            # keeps the spring inside the simulated dynamics rather than in
+            # the policy/action compensation path.
+            self.gym.refresh_rigid_body_state_tensor(self.sim)
+            self._apply_gas_spring_forces()
             self.gym.simulate(self.sim)
             if self.device == "cpu":
                 self.gym.fetch_results(self.sim, True)
@@ -1507,6 +1513,83 @@ class LeggedRobot(BaseTask):
             gymapi.ENV_SPACE,
         )
 
+    def _apply_gas_spring_forces(self):
+        """Apply a constant tensile gas-spring force to both leg sides.
+
+        The force direction is recomputed from the current attachment-point
+        positions.  Applying equal and opposite forces at the two sites gives
+        the thigh and shank the same reaction torques that a spatial spring
+        would generate, while keeping the approximation independent of the
+        policy's motor torque mapping.
+        """
+        if not self.gas_spring_enabled:
+            return
+
+        self.gas_spring_forces.zero_()
+        self.gas_spring_torques.zero_()
+        spring_force = float(self.cfg.asset.gas_spring_force)
+        spring_pairs = (
+            (
+                "right_thigh",
+                "right_shank",
+                self.gas_spring_site_thigh_right,
+                self.gas_spring_site_shank_right,
+            ),
+            (
+                "left_thigh",
+                "left_shank",
+                self.gas_spring_site_thigh_left,
+                self.gas_spring_site_shank_left,
+            ),
+        )
+
+        for thigh_name, shank_name, thigh_site, shank_site in spring_pairs:
+            thigh_state = self.rigid_body_states[
+                :, self.gas_spring_body_indices[thigh_name], :
+            ]
+            shank_state = self.rigid_body_states[
+                :, self.gas_spring_body_indices[shank_name], :
+            ]
+
+            thigh_offset = thigh_site.expand(self.num_envs, -1)
+            shank_offset = shank_site.expand(self.num_envs, -1)
+            thigh_pos = thigh_state[:, 0:3] + quat_apply(
+                thigh_state[:, 3:7], thigh_offset
+            )
+            shank_pos = shank_state[:, 0:3] + quat_apply(
+                shank_state[:, 3:7], shank_offset
+            )
+            spring_vector = shank_pos - thigh_pos
+            spring_length = torch.linalg.norm(
+                spring_vector, dim=1, keepdim=True
+            ).clamp_min(1.0e-6)
+            direction = spring_vector / spring_length
+
+            # A gas spring pushes its endpoints apart.  The equal/opposite
+            # forces also create the correct moment about each link COM.
+            force_on_thigh = -spring_force * direction
+            force_on_shank = spring_force * direction
+            thigh_arm = thigh_pos - thigh_state[:, 0:3]
+            shank_arm = shank_pos - shank_state[:, 0:3]
+
+            thigh_index = self.gas_spring_body_indices[thigh_name]
+            shank_index = self.gas_spring_body_indices[shank_name]
+            self.gas_spring_forces[:, thigh_index, :] += force_on_thigh
+            self.gas_spring_forces[:, shank_index, :] += force_on_shank
+            self.gas_spring_torques[:, thigh_index, :] += torch.cross(
+                thigh_arm, force_on_thigh, dim=1
+            )
+            self.gas_spring_torques[:, shank_index, :] += torch.cross(
+                shank_arm, force_on_shank, dim=1
+            )
+
+        self.gym.apply_rigid_body_force_tensors(
+            self.sim,
+            gymtorch.unwrap_tensor(self.gas_spring_forces),
+            gymtorch.unwrap_tensor(self.gas_spring_torques),
+            gymapi.ENV_SPACE,
+        )
+
     def _update_terrain_curriculum(self, env_ids):
         """Implements the game-inspired curriculum.
 
@@ -1724,14 +1807,19 @@ class LeggedRobot(BaseTask):
         # get gym GPU state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
+        rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
+        self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state).view(
+            self.num_envs, self.num_bodies, 13
+        )
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         wheel_dof_indices = [
@@ -1895,6 +1983,36 @@ class LeggedRobot(BaseTask):
         self.rigid_body_external_torques = torch.zeros(
             (self.num_envs, self.num_bodies, 3), device=self.device, requires_grad=False
         )
+        self.gas_spring_enabled = bool(
+            getattr(self.cfg.asset, "gas_spring_enabled", False)
+        )
+        self.gas_spring_forces = torch.zeros(
+            (self.num_envs, self.num_bodies, 3),
+            device=self.device,
+            requires_grad=False,
+        )
+        self.gas_spring_torques = torch.zeros_like(self.gas_spring_forces)
+        if self.gas_spring_enabled:
+            self.gas_spring_site_thigh_right = torch.as_tensor(
+                self.cfg.asset.gas_spring_thigh_site_right,
+                dtype=torch.float,
+                device=self.device,
+            ).view(1, 3)
+            self.gas_spring_site_shank_right = torch.as_tensor(
+                self.cfg.asset.gas_spring_shank_site_right,
+                dtype=torch.float,
+                device=self.device,
+            ).view(1, 3)
+            self.gas_spring_site_thigh_left = torch.as_tensor(
+                self.cfg.asset.gas_spring_thigh_site_left,
+                dtype=torch.float,
+                device=self.device,
+            ).view(1, 3)
+            self.gas_spring_site_shank_left = torch.as_tensor(
+                self.cfg.asset.gas_spring_shank_site_left,
+                dtype=torch.float,
+                device=self.device,
+            ).view(1, 3)
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.episode_max_abs_pitch = torch.zeros(
             self.num_envs,
@@ -2259,6 +2377,31 @@ class LeggedRobot(BaseTask):
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
+        self.gas_spring_enabled = bool(
+            getattr(self.cfg.asset, "gas_spring_enabled", False)
+        )
+        self.gas_spring_body_indices = {}
+        if self.gas_spring_enabled:
+            required_spring_bodies = {
+                "right_thigh": "rf0_Link",
+                "right_shank": "rf1_Link",
+                "left_thigh": "lf0_Link",
+                "left_shank": "lf1_Link",
+            }
+            missing_spring_bodies = [
+                body_name
+                for body_name in required_spring_bodies.values()
+                if body_name not in body_names
+            ]
+            if missing_spring_bodies:
+                raise RuntimeError(
+                    "Gas-spring approximation requires these rigid bodies in "
+                    f"the training asset: {missing_spring_bodies}"
+                )
+            for key, body_name in required_spring_bodies.items():
+                # Rigid-body state tensors use the same per-actor body order
+                # returned by get_asset_rigid_body_names().
+                self.gas_spring_body_indices[key] = body_names.index(body_name)
         feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:

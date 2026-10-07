@@ -106,6 +106,17 @@ class WheelLeggedCfg(LeggedRobotCfg):
         self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
 
+        # Constant-force gas-spring approximation used during Isaac Gym
+        # training.  The force is applied between the thigh and shank
+        # attachment sites, so it produces the corresponding reaction torque
+        # on both links without adding a second controller-side compensation.
+        gas_spring_enabled = True
+        gas_spring_force = 450.0  # N, same nominal force used by MuJoCo
+        gas_spring_thigh_site_right = [0.0186298076923, -0.0534855769231, -0.008]
+        gas_spring_shank_site_right = [0.00600961538462, -0.0552884615385, -0.005]
+        gas_spring_thigh_site_left = [0.0186298076923, 0.0534855769231, -0.008]
+        gas_spring_shank_site_left = [0.00600961538462, 0.0552884615385, -0.005]
+
 
 class WheelLeggedCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):

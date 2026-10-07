@@ -108,9 +108,6 @@ RIGHT_GAS_SPRING_ACTUATOR_NAME = "Right_loop1_motor"
 GAS_SPRING_RATED_FORCE = 450.0
 LEFT_GAS_SPRING_CTRL = GAS_SPRING_RATED_FORCE
 RIGHT_GAS_SPRING_CTRL = GAS_SPRING_RATED_FORCE
-# The deployment controller used 370.1 for the original 300 N spring.
-# Preserve that calibrated conversion when scaling the spring to 450 N.
-GAS_SPRING_FORCE = 370.1 * (GAS_SPRING_RATED_FORCE / 300.0)
 
 
 def fit_vector(vec: np.ndarray, dim: int) -> np.ndarray:
@@ -815,16 +812,17 @@ class BinglianRuntime:
                     f"R={np.array2string(j_r, precision=5, suppress_small=True)}"
                 )
 
-        matrix_l, matrix_l_inv, left_l0 = force_map(DEFAULT_OFFSET + lf20_angle, lf0_angle, self.args.l1, self.args.l2)
+        # The MuJoCo tendon motor below already supplies the physical gas
+        # spring force.  Do not add the old calibrated torque compensation to
+        # the policy command, otherwise deployment would double-count it.
+        matrix_l, matrix_l_inv, _ = force_map(DEFAULT_OFFSET + lf20_angle, lf0_angle, self.args.l1, self.args.l2)
         ftp_l = matrix_l_inv @ np.array([[tau_lf20_act], [tau_lf0_act]], dtype=np.float32)
-        ftp_l[0, 0] -= GAS_SPRING_FORCE * left_l0
         if self.is_jump_f_scale_active():
             ftp_l[0, 0] *= float(self.args.jump_f_scale)
         tau_lf20_act, tau_lf0_act = (matrix_l @ ftp_l).reshape(-1).tolist()
 
-        matrix_r, matrix_r_inv, right_l0 = force_map(DEFAULT_OFFSET + rf20_angle, rf0_angle, self.args.l1, self.args.l2)
+        matrix_r, matrix_r_inv, _ = force_map(DEFAULT_OFFSET + rf20_angle, rf0_angle, self.args.l1, self.args.l2)
         ftp_r = matrix_r_inv @ np.array([[tau_rf20_act], [tau_rf0_act]], dtype=np.float32)
-        ftp_r[0, 0] += GAS_SPRING_FORCE * right_l0
         if self.is_jump_f_scale_active():
             ftp_r[0, 0] *= float(self.args.jump_f_scale)
         tau_rf20_act, tau_rf0_act = (matrix_r @ ftp_r).reshape(-1).tolist()
@@ -942,8 +940,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--torque_scale", type=float, default=1.0)
     parser.add_argument("--torque_map", type=str, default="analytic", choices=["analytic", "numeric"])
     parser.add_argument("--base_body_name", type=str, default="base_Link_del")
-    parser.add_argument("--l1", type=float, default=0.175)
-    parser.add_argument("--l2", type=float, default=0.208)
+    # Defaults for the long-leg URDF used by the current training setup.
+    parser.add_argument("--l1", type=float, default=0.21)
+    parser.add_argument("--l2", type=float, default=0.25)
     parser.add_argument("--print_base_ang_vel", action="store_true")
     parser.add_argument("--print_jacobian", action="store_true")
     parser.add_argument("--print_interval", type=int, default=20)
