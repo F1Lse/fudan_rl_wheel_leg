@@ -95,6 +95,16 @@ class WheelLeggedCfg(LeggedRobotCfg):
         self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
 
+        # Use the same constant-force gas-spring approximation as the plane
+        # locomotion task.  The force is applied at the thigh/shank mounting
+        # points and therefore participates in the jump dynamics.
+        gas_spring_enabled = True
+        gas_spring_force = 450.0  # N, nominal MuJoCo tendon force
+        gas_spring_thigh_site_right = [0.0186298076923, -0.0534855769231, -0.008]
+        gas_spring_shank_site_right = [0.00600961538462, -0.0552884615385, -0.005]
+        gas_spring_thigh_site_left = [0.0186298076923, 0.0534855769231, -0.008]
+        gas_spring_shank_site_left = [0.00600961538462, 0.0552884615385, -0.005]
+
 
 class WheelLeggedCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
