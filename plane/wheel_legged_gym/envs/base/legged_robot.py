@@ -221,6 +221,7 @@ class LeggedRobot(BaseTask):
         )
         self.episode_spin_steps += commanded_spin
         self._update_terrain_impact_tuck_state()
+        self._update_vertical_touchdown_support()
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
         theta1 = torch.cat(
@@ -434,6 +435,8 @@ class LeggedRobot(BaseTask):
         self.last_actions[env_ids] = 0.0
         self.last_dof_vel[env_ids] = 0.0
         self.feet_air_time[env_ids] = 0.0
+        self.last_contacts[env_ids] = False
+        self.terrain_touchdown_support_timer[env_ids] = 0
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.fail_buf[env_ids] = 0
@@ -1877,6 +1880,9 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         )
+        self.terrain_touchdown_support_timer = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
         self.base_lin_vel = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 7:10]
         )
@@ -2104,7 +2110,14 @@ class LeggedRobot(BaseTask):
                     device=self.device,
                 )
             ).squeeze(-1)
-            self.action_delay_idx = action_delay_idx.long()
+            # Rounding the sampled delay can produce exactly ``delay_max``
+            # (for example, an 8 ms bound with a 5 ms control step), while
+            # the FIFO's last valid index is ``delay_max - 1``.  Clamp the
+            # index so domain-randomized startup cannot trigger a CUDA
+            # out-of-bounds assertion.
+            self.action_delay_idx = action_delay_idx.long().clamp(
+                0, self.action_fifo.shape[1] - 1
+            )
         # === reward 用的 DOF 历史（防止站立时腿/轮乱动）===
         self.last_dof_pos_reward = self.dof_pos.clone()
         # === reward 用的 base 位置历史（世界坐标）===
@@ -2445,7 +2458,9 @@ class LeggedRobot(BaseTask):
 
         for column in range(self.cfg.terrain.num_cols):
             choice = column / self.cfg.terrain.num_cols + 0.001
-            if self.cfg.terrain.custom_terrain_mode == "bidirectional_focus":
+            if self.cfg.terrain.custom_terrain_mode == "single_drop_focus":
+                terrain_name = "custom_curb_drop"
+            elif self.cfg.terrain.custom_terrain_mode == "bidirectional_focus":
                 terrain_name = (
                     "custom_curb_drop"
                     if column < self.cfg.terrain.num_cols // 2
@@ -2782,6 +2797,42 @@ class LeggedRobot(BaseTask):
             impact_abs_pitch * reflex_active,
         )
 
+    def _update_vertical_touchdown_support(self):
+        """Trigger a support window when a falling robot first regains wheel contact."""
+        if not (
+            "touchdown_support" in self.reward_scales
+            or "touchdown_support_velocity" in self.reward_scales
+        ):
+            return
+        contact = self.contact_forces[:, self.feet_indices, 2] > 8.0
+        any_contact = torch.any(contact, dim=1)
+        was_contact = torch.any(self.last_contacts, dim=1)
+        touchdown = any_contact & (~was_contact) & (self.root_states[:, 9] < -0.20)
+        hold_steps = max(1, int(round(
+            self.cfg.rewards.terrain_touchdown_support_hold_s / self.dt
+        )))
+        self.terrain_touchdown_support_timer = torch.clamp(
+            self.terrain_touchdown_support_timer - 1, min=0
+        )
+        self.terrain_touchdown_support_timer = torch.where(
+            touchdown,
+            torch.full_like(self.terrain_touchdown_support_timer, hold_steps),
+            self.terrain_touchdown_support_timer,
+        )
+        self.last_contacts[:] = contact
+
+    def _reward_touchdown_support(self):
+        active = (self.terrain_touchdown_support_timer > 0).float()
+        l0_error = torch.mean(
+            torch.square(self.L0 - self.cfg.rewards.terrain_touchdown_support_l0), dim=1
+        )
+        return active * torch.exp(-l0_error / 0.0025)
+
+    def _reward_touchdown_support_velocity(self):
+        active = (self.terrain_touchdown_support_timer > 0).float()
+        # Penalize continued downward body motion during the support window.
+        return active * torch.square(torch.clamp(self.root_states[:, 9], max=0.0))
+
     def _terrain_impact_extend_target(self):
         """Select the catch pose from the commanded traversal direction.
 
@@ -2980,6 +3031,52 @@ class LeggedRobot(BaseTask):
 
     def _reward_high_stand_action_smooth(self):
         return self._high_stand_idle_mask() * self._reward_action_smooth()
+
+    def _idle_hold_mask(self):
+        """Select commands that request no translation or yaw."""
+        return (
+            (torch.abs(self.commands[:, 0]) < 1.0e-6)
+            & (torch.abs(self.commands[:, 1]) < 1.0e-6)
+        ).float()
+
+    def _reward_idle_hold_wheel_vel(self):
+        """Keep both wheels from creeping while balancing in place."""
+        wheel_vel = torch.index_select(self.dof_vel, 1, self.wheel_dof_indices)
+        return self._idle_hold_mask() * torch.mean(torch.square(wheel_vel), dim=1)
+
+    def _reward_idle_hold_wheel_action_rate(self):
+        """Keep the equilibrium wheel torque command continuous."""
+        wheel_actions = self.actions[:, self.wheel_dof_indices]
+        previous = self.last_actions[:, self.wheel_dof_indices, 0]
+        return self._idle_hold_mask() * torch.mean(
+            torch.square(wheel_actions - previous), dim=1
+        )
+
+    def _reward_idle_hold_leg_position_symmetry(self):
+        """Suppress left/right leg pumping in the zero-command hold."""
+        mirrored_error = torch.stack(
+            (
+                self.dof_pos[:, 0] + self.dof_pos[:, 3],
+                self.dof_pos[:, 1] + self.dof_pos[:, 4],
+            ),
+            dim=1,
+        )
+        return self._idle_hold_mask() * torch.mean(
+            torch.square(mirrored_error), dim=1
+        )
+
+    def _reward_idle_hold_leg_velocity_symmetry(self):
+        """Suppress alternating left/right leg motion in the hold."""
+        mirrored_velocity_error = torch.stack(
+            (
+                self.dof_vel[:, 0] + self.dof_vel[:, 3],
+                self.dof_vel[:, 1] + self.dof_vel[:, 4],
+            ),
+            dim=1,
+        )
+        return self._idle_hold_mask() * torch.mean(
+            torch.square(mirrored_velocity_error), dim=1
+        )
 
     def _spin_stationary_mask(self):
         """Select SPIN samples that request no forward translation."""

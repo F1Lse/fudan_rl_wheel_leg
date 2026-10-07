@@ -137,6 +137,11 @@ class Terrain:
             # half starts high and descends, the second half starts low and climbs.
             curb_double_drop_terrain(terrain, reverse=choice >= 0.5)
             return terrain
+        if self.cfg.custom_terrain_mode == "single_drop_focus":
+            # Spawn on a single raised platform and fall directly to the
+            # surrounding lower plane in either travel direction.
+            single_drop_terrain(terrain, drop_height=0.45)
+            return terrain
         if choice < self.proportions[0]:
             terrain_utils.pyramid_sloped_terrain(terrain, slope=0, platform_size=3.0)
         elif choice < self.proportions[1]:
@@ -316,6 +321,24 @@ def curb_double_drop_terrain(
         terrain.height_field_raw[negative_curb_start:negative_curb_end, :] = curb_raw
         terrain.height_field_raw[negative_middle_start:negative_curb_start, :] = middle_raw
         terrain.height_field_raw[:negative_middle_start, :] = final_raw
+
+
+def single_drop_terrain(terrain, platform_half_length=1.5, drop_height=0.25):
+    """Create one raised platform with a clean drop on both ends.
+
+    The robot is spawned at the center of the high platform.  Moving either
+    forward or backward crosses one edge and lands on the lower plane; there
+    are no curbs, intermediate platforms, or second drops.
+    """
+    horizontal_scale = terrain.horizontal_scale
+    vertical_scale = terrain.vertical_scale
+    half_cells = max(1, int(round(platform_half_length / horizontal_scale)))
+    center_x = terrain.length // 2
+    start = max(0, center_x - half_cells)
+    end = min(terrain.length, center_x + half_cells)
+    high_raw = int(round(drop_height / vertical_scale))
+    terrain.height_field_raw[:, :] = 0
+    terrain.height_field_raw[start:end, :] = high_raw
 
 
 def gap_terrain(terrain, gap_size, platform_size=1.0):

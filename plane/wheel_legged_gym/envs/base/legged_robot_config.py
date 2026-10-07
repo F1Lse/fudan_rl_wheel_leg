@@ -182,6 +182,7 @@ class LeggedRobotCfg(BaseConfig):
             {
                 "descent_discrete",
                 "descent_focus",
+                "single_drop_focus",
                 "bidirectional",
                 "bidirectional_focus",
             },
@@ -482,6 +483,22 @@ class LeggedRobotCfg(BaseConfig):
                 "WLG_HIGH_STAND_ACTION_SMOOTH_SCALE", 0.0
             )
 
+            # Exact zero-command hold terms.  These keep the two wheels quiet
+            # and the serial legs mirrored while the body is balancing in
+            # place; moving and turning commands do not see these terms.
+            idle_hold_wheel_vel = _env_float(
+                "WLG_IDLE_HOLD_WHEEL_VEL_SCALE", 0.0
+            )
+            idle_hold_wheel_action_rate = _env_float(
+                "WLG_IDLE_HOLD_WHEEL_ACTION_RATE_SCALE", 0.0
+            )
+            idle_hold_leg_position_symmetry = _env_float(
+                "WLG_IDLE_HOLD_LEG_POSITION_SYMMETRY_SCALE", 0.0
+            )
+            idle_hold_leg_velocity_symmetry = _env_float(
+                "WLG_IDLE_HOLD_LEG_VELOCITY_SYMMETRY_SCALE", 0.0
+            )
+
             # Extra stability terms used only when the SPIN policy receives an
             # exact zero forward-speed command. Moving turns retain the normal,
             # weaker orientation/rate penalties and may lean dynamically.
@@ -569,6 +586,14 @@ class LeggedRobotCfg(BaseConfig):
             terrain_impact_pitch_rate = _env_float(
                 "WLG_TERRAIN_IMPACT_PITCH_RATE_SCALE", 0.0
             )
+            # Pure vertical drop support: trigger on wheel touchdown after
+            # flight and keep the leg length from collapsing into the limits.
+            touchdown_support = _env_float(
+                "WLG_TERRAIN_TOUCHDOWN_SUPPORT_SCALE", 0.0
+            )
+            touchdown_support_velocity = _env_float(
+                "WLG_TERRAIN_TOUCHDOWN_SUPPORT_VELOCITY_SCALE", 0.0
+            )
 
             collision = _env_float("WLG_COLLISION_SCALE", -1.0)
             wheel_support = _env_float("WLG_WHEEL_SUPPORT_SCALE", 0.0)
@@ -635,6 +660,12 @@ class LeggedRobotCfg(BaseConfig):
         )
         terrain_impact_extend_hold_s = _env_float(
             "WLG_TERRAIN_IMPACT_EXTEND_HOLD_S", 0.18
+        )
+        terrain_touchdown_support_hold_s = _env_float(
+            "WLG_TERRAIN_TOUCHDOWN_SUPPORT_HOLD_S", 0.40
+        )
+        terrain_touchdown_support_l0 = _env_float(
+            "WLG_TERRAIN_TOUCHDOWN_SUPPORT_L0", 0.26
         )
         terrain_impact_extend_sigma = _env_float(
             "WLG_TERRAIN_IMPACT_EXTEND_SIGMA", 0.12

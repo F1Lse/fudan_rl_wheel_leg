@@ -36,6 +36,19 @@ from wheel_legged_gym.envs.base.legged_robot_config import (
 
 class WheelLeggedCfg(LeggedRobotCfg):
 
+    class commands(LeggedRobotCfg.commands):
+        # Train the jump policy with a commanded forward/backward velocity so
+        # the jump phase learns to preserve horizontal motion instead of only
+        # learning an in-place hop.  Keep yaw fixed for this first pass; it
+        # isolates the moving-jump problem without adding observations.
+        resampling_time = 20.0
+
+        class ranges(LeggedRobotCfg.commands.ranges):
+            lin_vel_x = [-2.1, 2.1]
+            ang_vel_yaw = [0.0, 0.0]
+            height = [0.16, 0.16]
+
+
     class init_state(LeggedRobotCfg.init_state):
         # pos = [0.0, 0.0, 0.1]  # x,y,z [m]
         # default_joint_angles = { "lf0_Joint": -0.23, 
@@ -46,7 +59,7 @@ class WheelLeggedCfg(LeggedRobotCfg):
         #                         "r_wheel_Joint": 0.0, 
         #                         }
         # The shared long-leg URDF needs this clearance in the default pose.
-        pos = [0.0, 0.0, 0.30]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.25]  # x,y,z [m]
         default_joint_angles = { "lf0_Joint": 0.2, 
                                 "lf1_Joint": 0.4, 
                                 "l_wheel_Joint": 0.0, 

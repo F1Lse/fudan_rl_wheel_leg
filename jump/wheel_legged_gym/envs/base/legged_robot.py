@@ -215,12 +215,15 @@ class LeggedRobot(BaseTask):
         )
         self.L0 = torch.sqrt(end_x**2 + end_y**2)
         self.theta0 = torch.arctan2(end_y, end_x) - self.pi / 2
+        self.L0_rate = (self.L0 - self.last_L0) / self.dt
 
         self._post_physics_step_callback()
         self.check_jump()
         # print(self.base_height)
         # compute observations, rewards, resets, ...
         self.check_termination()
+        if getattr(self.cfg.rewards, "reset_on_jump_success", True):
+            self.reset_buf |= self.jump_success
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
@@ -231,27 +234,68 @@ class LeggedRobot(BaseTask):
         self.last_base_position[:] = self.base_position[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
+        self.last_L0[:] = self.L0[:]
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
 
 
     def check_jump(self):
-        """ Check if the robot has jumped
-        """
-        self.was_in_flight[:] = False
-        contact = self.contact_forces[:, self.feet_indices, 2] > 1.0         #contect: (num_envs, num_feet:2)  
-        # print("contact",contact)
-        self.contact_filt =torch.logical_or(contact, self.last_contacts)    #self.contact_filt: (num_envs, num_feet:2)  
-        self.last_contacts=contact.clone()
+        """Update a contact based jump state machine."""
+        contact = self.contact_forces[:, self.feet_indices, 2] > 1.0
+        had_contact = torch.any(self.last_contacts, dim=1)
+        was_in_flight = self.was_in_flight.clone()
+        was_jump_active = self.jump_active.clone()
+        in_flight = ~torch.any(contact, dim=1)
 
-        jump_filter = torch.all(~self.contact_filt , dim=1)     #jump_filter: (num_envs,)  True表示两只脚都没有接触地面
+        # A flight phase is valid only after contact and a positive upward
+        # velocity.  Falling or a one-frame contact gap cannot start a jump.
+        self.just_takeoff[:] = (
+            had_contact
+            & in_flight
+            & (self.root_states[:, 9] > self.cfg.rewards.jump_takeoff_vz)
+        )
+        self.just_landed[:] = was_jump_active & (~in_flight)
+        self.landing_recovery_timer[:] = torch.clamp(
+            self.landing_recovery_timer - self.dt, min=0.0
+        )
+        self.landing_recovery_timer[self.just_landed] = self.cfg.rewards.landing_buffer_time
+        self.was_in_flight[:] = in_flight
+        self.jump_active[:] = (was_jump_active & in_flight) | self.just_takeoff
+        self.contact_filt[:] = contact
+        self.last_contacts[:] = contact
 
-        # was_in_flight=torch.logical_and(jump_filter,self.commands[:,2]>0)
-        was_in_flight = jump_filter
-        self.was_in_flight[was_in_flight] = True
-        
-      
+        if torch.any(self.just_takeoff):
+            self.jump_takeoff_height[self.just_takeoff] = self.root_states[
+                self.just_takeoff, 2
+            ]
+            self.jump_peak_height[self.just_takeoff] = self.root_states[
+                self.just_takeoff, 2
+            ]
+
+        current_air_time = self.jump_air_time + self.dt
+        current_peak = torch.maximum(self.jump_peak_height, self.root_states[:, 2])
+        self.last_jump_air_time[:] = torch.where(
+            self.just_landed, current_air_time, self.last_jump_air_time
+        )
+        self.last_jump_peak_height[:] = torch.where(
+            self.just_landed, current_peak, self.last_jump_peak_height
+        )
+        self.jump_air_time[:] = torch.where(
+            self.jump_active & in_flight,
+            current_air_time,
+            torch.zeros_like(current_air_time),
+        )
+        self.jump_peak_height[:] = torch.where(
+            self.jump_active & in_flight, current_peak, self.jump_peak_height
+        )
+
+        height_gain = self.last_jump_peak_height - self.jump_takeoff_height
+        self.jump_success[:] = (
+            self.just_landed
+            & (self.last_jump_air_time >= self.cfg.rewards.jump_min_air_time)
+            & (height_gain >= self.cfg.rewards.jump_min_height)
+        )
 
     def check_termination(self):
         """Check if environments need to be reset"""
@@ -313,11 +357,27 @@ class LeggedRobot(BaseTask):
         self.last_actions[env_ids] = 0.0
         self.last_dof_vel[env_ids] = 0.0
         self.feet_air_time[env_ids] = 0.0
+        self.base_air_time[env_ids] = 0.0
+        self.jump_air_time[env_ids] = 0.0
+        self.jump_peak_height[env_ids] = 0.0
+        self.jump_takeoff_height[env_ids] = 0.0
+        self.last_jump_air_time[env_ids] = 0.0
+        self.last_jump_peak_height[env_ids] = 0.0
+        self.last_contacts[env_ids] = False
+        self.contact_filt[env_ids] = False
+        self.was_in_flight[env_ids] = False
+        self.jump_active[env_ids] = False
+        self.just_takeoff[env_ids] = False
+        self.just_landed[env_ids] = False
+        self.jump_success[env_ids] = False
+        self.landing_recovery_timer[env_ids] = 0.0
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.fail_buf[env_ids] = 0
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
+        self.last_L0[env_ids] = self.L0[env_ids]
+        self.L0_rate[env_ids] = 0.0
         self.last_base_position[env_ids] = self.base_position[env_ids]
         self.obs_history[env_ids] = 0
         obs_buf = self.compute_proprioception_observations()
@@ -367,13 +427,26 @@ class LeggedRobot(BaseTask):
         adds each terms to the episode sums and to the total reward
         """
         self.rew_buf[:] = 0.0
+        jump_reward_names = {
+            "encourage_jump", "base_height_flight", "leg_tuck", "push_off_extend",
+            "push_off_speed", "tuck_speed", "landing_prepare", "landing_symmetry",
+            "landing_recovery", "vertical_push_symmetry",
+            "soft_landing", "landing_impact",
+            "takeoff_extend", "landing_success", "line_z", "flight",
+            "flight_orientation"
+        }
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
             rew = self.reward_functions[i]() * self.reward_scales[name]
+            clip_scale = (
+                self.cfg.rewards.jump_clip_single_reward
+                if name in jump_reward_names
+                else self.cfg.rewards.clip_single_reward
+            )
             rew = torch.clip(
                 rew,
-                -self.cfg.rewards.clip_single_reward * self.dt,
-                self.cfg.rewards.clip_single_reward * self.dt,
+                -clip_scale * self.dt,
+                clip_scale * self.dt,
             )
             self.rew_buf += rew
             self.episode_sums[name] += rew
@@ -807,9 +880,20 @@ class LeggedRobot(BaseTask):
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
         # base velocities
-        self.root_states[env_ids, 7:13] = torch_rand_float(
-            -0.5, 0.5, (len(env_ids), 6), device=self.device
-        )  # [7:10]: lin vel, [10:13]: ang vel
+        # The jump branch must learn to trigger while the chassis is already
+        # moving.  Randomize the incoming forward/backward speed explicitly,
+        # while keeping lateral and angular disturbances small.
+        vx_min = getattr(self.cfg.rewards, "jump_init_vx_min", -1.5)
+        vx_max = getattr(self.cfg.rewards, "jump_init_vx_max", 1.5)
+        self.root_states[env_ids, 7] = torch_rand_float(
+            vx_min, vx_max, (len(env_ids), 1), device=self.device
+        ).squeeze(-1)
+        self.root_states[env_ids, 8] = torch_rand_float(
+            -0.05, 0.05, (len(env_ids), 1), device=self.device
+        ).squeeze(-1)
+        self.root_states[env_ids, 9:13] = torch_rand_float(
+            -0.05, 0.05, (len(env_ids), 4), device=self.device
+        )
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -1176,6 +1260,8 @@ class LeggedRobot(BaseTask):
         self.L0 = torch.zeros(
             self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
         )
+        self.last_L0 = torch.zeros_like(self.L0)
+        self.L0_rate = torch.zeros_like(self.L0)
         self.theta0 = torch.zeros(
             self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -1269,11 +1355,20 @@ class LeggedRobot(BaseTask):
         self.base_air_time = torch.zeros(
             self.num_envs, dtype=torch.float, device=self.device, requires_grad=False
         )
-   
+        self.jump_air_time = torch.zeros_like(self.base_air_time)
+        self.jump_peak_height = torch.zeros_like(self.base_air_time)
+        self.jump_takeoff_height = torch.zeros_like(self.base_air_time)
+        self.last_jump_air_time = torch.zeros_like(self.base_air_time)
+        self.last_jump_peak_height = torch.zeros_like(self.base_air_time)
+        self.landing_recovery_timer = torch.zeros_like(self.base_air_time)
 
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.contact_filt = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.was_in_flight = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.jump_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.just_takeoff = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.just_landed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.jump_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, whcih will be called to compute the total reward.
@@ -1729,25 +1824,16 @@ class LeggedRobot(BaseTask):
   
 # ------------ reward functions----------------
     def _reward_encourage_jump(self):
-
-        first_contact = (self.base_air_time > 0.0) * ~self.was_in_flight
-        self.base_air_time += self.dt * torch.clip(
-            self.root_states[:, 2],
-            torch.tensor(0.0, device=self.device),
-            0.50,
+        # Dense push-off shaping helps exploration, while the larger event term
+        # is still reserved for a real contact-to-flight transition.
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
         )
-
-        rew_airTime = (self.base_air_time - 5e-5) * first_contact * 0.15
-
-        rew_airTime += (
-            torch.maximum(
-                torch.tensor(0.0, device=self.device), self.root_states[:, 9]
-            )
-
-        )  * 0.15
-
-        self.base_air_time *= ~self.was_in_flight
-        return rew_airTime
+        valid_flight = self.jump_active & self.was_in_flight
+        vz_up = torch.relu(self.root_states[:, 9])
+        # Give a useful gradient before the strict takeoff detector fires.
+        push_off = vz_up * contact.float() * 2.0
+        return self.just_takeoff.float() * 2.0 + push_off + vz_up * valid_flight.float() * 0.10
     
     def _reward_air_time(self):
 
@@ -1760,28 +1846,148 @@ class LeggedRobot(BaseTask):
     
     def _reward_line_z(self):
         #在初始化后和落地之前z轴线速度越大越好
-        rew=(self.root_states[:, 9]>0)*self.root_states[:, 9] * (self.was_in_flight)
+        valid_flight = self.jump_active & self.was_in_flight
+        rew=(self.root_states[:, 9]>0)*self.root_states[:, 9] * valid_flight
         return rew
     
     def _reward_leg_tuck(self):
         # Reward tucking legs in air (shorter virtual leg length) during flight.
-        leg_tuck_err = torch.sum(torch.abs(self.L0 - 0.16), dim=1)
-        rew = torch.exp(-leg_tuck_err * 4.0) * (self.was_in_flight) 
+        leg_tuck_err = torch.sum(
+            torch.abs(self.L0 - self.cfg.rewards.jump_tuck_target), dim=1
+        )
+        valid_flight = self.jump_active & self.was_in_flight
+        rew = torch.exp(-leg_tuck_err * 10.0) * valid_flight
         return rew
     
     def _reward_base_height_flight(self):
-        #跳跃的高度奖励
-        base_height_flight = (self.root_states[:, 2] - 0.65)
-        rew= torch.exp(-torch.abs(base_height_flight)*6.0)*(self.was_in_flight)
-        return rew 
+        target = self.jump_takeoff_height + self.cfg.rewards.jump_height_target
+        base_height_flight = self.root_states[:, 2] - target
+        valid_flight = self.jump_active & self.was_in_flight
+        return torch.exp(-torch.abs(base_height_flight) * 18.0) * valid_flight
     
     def _reward_takeoff_extend(self):
         # Reward extending the virtual leg during the push-off phase.
-        takeoff_mask = torch.any(self.contact_filt, dim=1) & (self.root_states[:, 9] > 0.15)
+        takeoff_mask = self.just_takeoff & (self.root_states[:, 9] > 0.05)
         target_l0 = 0.31
         l0_err = torch.sum(torch.abs(self.L0 - target_l0), dim=1)
         rew = torch.exp(-l0_err * 4.0) * takeoff_mask
         return rew
+
+    def _reward_push_off_extend(self):
+        """Shape the pre-takeoff posture toward an extended support leg."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        l0_err = torch.sum(torch.abs(self.L0 - 0.31), dim=1)
+        vz_up = torch.relu(self.root_states[:, 9])
+        return torch.exp(-l0_err * 4.0) * contact.float() * (0.20 + 8.0 * vz_up)
+
+    def _reward_push_off_speed(self):
+        """Reward fast virtual-leg extension while the wheels still support the body."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        extension_rate = torch.relu(torch.mean(self.L0_rate, dim=1))
+        sync = torch.exp(
+            -40.0 * torch.square(self.L0[:, 0] - self.L0[:, 1])
+            -8.0 * torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        )
+        return torch.clamp(extension_rate / 0.6, 0.0, 1.0) * contact.float() * sync
+
+    def _reward_vertical_push_symmetry(self):
+        """Make the takeoff impulse vertical and shared by both legs."""
+        fz = self.contact_forces[:, self.feet_indices, 2]
+        contact = torch.any(fz > 1.0, dim=1)
+        force_sync = torch.exp(-torch.abs(fz[:, 0] - fz[:, 1]) / 25.0)
+        leg_sync = torch.exp(
+            -40.0 * torch.square(self.L0[:, 0] - self.L0[:, 1])
+            -8.0 * torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        )
+        vz_up = torch.clamp(torch.relu(self.root_states[:, 9]) / 0.35, 0.0, 1.0)
+        return vz_up * contact.float() * force_sync * leg_sync
+
+    def _reward_tuck_speed(self):
+        """Reward fast virtual-leg shortening only after true takeoff."""
+        valid_flight = self.jump_active & self.was_in_flight
+        tuck_rate = torch.relu(-torch.mean(self.L0_rate, dim=1))
+        sync = torch.exp(
+            -40.0 * torch.square(self.L0[:, 0] - self.L0[:, 1])
+            -8.0 * torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        )
+        return torch.clamp(tuck_rate / 0.8, 0.0, 1.0) * valid_flight.float() * sync
+
+    def _reward_landing_prepare(self):
+        """Prepare both legs symmetrically for contact while descending."""
+        descending = (
+            self.jump_active
+            & self.was_in_flight
+            & (self.root_states[:, 9] < -0.08)
+        )
+        target_l0 = 0.18
+        l0_err = torch.sum(torch.abs(self.L0 - target_l0), dim=1)
+        symmetry = torch.exp(
+            -35.0 * torch.square(self.L0[:, 0] - self.L0[:, 1])
+            -8.0 * torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        )
+        return torch.exp(-7.0 * l0_err) * symmetry * descending.float()
+
+    def _reward_landing_symmetry(self):
+        """Reward a level, non-split two-leg touchdown."""
+        symmetry = torch.exp(
+            -45.0 * torch.square(self.L0[:, 0] - self.L0[:, 1])
+            -10.0 * torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        )
+        stable = torch.exp(-20.0 * torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1))
+        return self.just_landed.float() * symmetry * stable
+
+    def _reward_landing_recovery(self):
+        """Restore the symmetric short-leg stance before the next jump."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        recovery = (
+            (~self.jump_active)
+            & (~self.was_in_flight)
+            & (self.last_jump_air_time >= self.cfg.rewards.jump_min_air_time)
+        )
+        theta_err = torch.sum(torch.square(self.theta0), dim=1)
+        buffer_phase = torch.clamp(
+            self.landing_recovery_timer / self.cfg.rewards.landing_buffer_time,
+            0.0,
+            1.0,
+        )
+        target_l0 = 0.16 + (self.cfg.rewards.landing_initial_l0 - 0.16) * buffer_phase
+        l0_err = torch.sum(torch.abs(self.L0 - target_l0.unsqueeze(1)), dim=1)
+        split_err = torch.square(self.L0[:, 0] - self.L0[:, 1])
+        stance = torch.exp(-12.0 * theta_err - 10.0 * l0_err - 35.0 * split_err)
+        return stance * contact.float() * recovery.float()
+
+    def _reward_soft_landing(self):
+        """Discourage slamming into the leg limit on touchdown."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        touchdown = self.landing_recovery_timer > 0.0
+        downward_speed = torch.relu(-self.root_states[:, 9])
+        collapse_speed = torch.relu(-torch.mean(self.L0_rate, dim=1))
+        # A high value means the body and virtual legs arrive gently and
+        # continue toward the support length without a hard stop.
+        vz_term = torch.exp(-downward_speed / 0.35)
+        l0_rate_term = torch.exp(-collapse_speed / 0.55)
+        return vz_term * l0_rate_term * contact.float() * touchdown.float()
+
+    def _reward_landing_impact(self):
+        """Direct penalty for a hard downward touchdown or leg collapse."""
+        downward_speed = torch.relu(-self.root_states[:, 9])
+        collapse_speed = torch.relu(-torch.mean(self.L0_rate, dim=1))
+        impact = torch.clamp(
+            downward_speed / 0.45 + collapse_speed / 0.65, 0.0, 2.0
+        )
+        return -impact * self.just_landed.float()
+
+    def _reward_landing_success(self):
+        stable = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1) < 0.20
+        return self.jump_success.float() * stable.float()
     
     def _reward_L0_flight(self):
         #跳跃的高度奖励
@@ -1791,8 +1997,9 @@ class LeggedRobot(BaseTask):
     
 
     def _reward_flight(self):
-        # Penalize dof velocities
-        return self.was_in_flight  
+        # Reward sustained flight instead of a one-frame contact gap.
+        valid_flight = self.jump_active & self.was_in_flight
+        return torch.clamp(self.jump_air_time / 0.12, 0.0, 1.0) * valid_flight
 
 
     def _reward_ang_vel_xy(self):
@@ -1801,6 +2008,12 @@ class LeggedRobot(BaseTask):
     def _reward_orientation(self):
         # Penalize non flat base orientation
         return torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+
+    def _reward_flight_orientation(self):
+        """Keep the chassis level during takeoff and flight."""
+        flight = self.jump_active & (self.was_in_flight | self.just_takeoff)
+        tilt2 = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+        return torch.exp(-35.0 * tilt2) * flight.float()
 
     def _reward_torques(self):
         # Penalize torques
@@ -1953,6 +2166,32 @@ class LeggedRobot(BaseTask):
         a = torch.square(self.theta0[:, 0] - self.theta0[:, 1])
         b = 10 * torch.square(self.L0[:, 0] - self.L0[:, 1]) 
         return a + b
+
+    def _reward_balance_leg_length(self):
+        """Keep both supporting virtual legs near the short standing length."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        err = torch.sum(torch.abs(self.L0 - 0.16), dim=1)
+        # During push-off, the short-leg standing target must release so it does
+        # not directly oppose the extension needed to leave the ground.
+        push_phase = (self.root_states[:, 9] > 0.02) | (torch.mean(self.L0, dim=1) > 0.20)
+        return torch.exp(-8.0 * err) * contact.float() * (~push_phase).float()
+
+    def _reward_balance_under_body(self):
+        """Keep the virtual-leg angles centered under the body while grounded."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        return torch.exp(-6.0 * torch.sum(torch.square(self.theta0), dim=1)) * contact.float()
+
+    def _reward_balance_orientation(self):
+        """Require a level base while the wheels are supporting the robot."""
+        contact = torch.any(
+            self.contact_forces[:, self.feet_indices, 2] > 1.0, dim=1
+        )
+        tilt2 = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+        return torch.exp(-20.0 * tilt2) * contact.float()
         
 
         

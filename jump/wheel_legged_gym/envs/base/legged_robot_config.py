@@ -187,31 +187,58 @@ class LeggedRobotCfg(BaseConfig):
             tracking_ang_vel = 1.0
 
             # base_vel_z_track = 50.0
-            flight = 0.15
-            encourage_jump = 1.0
-            base_height_flight = 6.0
-            leg_tuck = 1.7
-            takeoff_extend = 0.5
+            flight = 1.0
+            encourage_jump = 6.0
+            base_height_flight = 8.0
+            leg_tuck = 3.0
+            push_off_extend = 5.0
+            # Keep the 5500 posture branch intact; the moving-jump experiment
+            # adds only a small, explicitly vertical takeoff term.
+            push_off_speed = 0.0
+            tuck_speed = 0.0
+            landing_prepare = 2.0
+            landing_symmetry = 8.0
+            landing_recovery = 4.0
+            vertical_push_symmetry = 5.0
+            soft_landing = 6.0
+            landing_impact = 5.0
+            takeoff_extend = 3.0
+            landing_success = 8.0
 
             line_z = 6.0
+            balance_leg_length = 4.0
+            balance_under_body = 2.0
+            balance_orientation = 4.0
+            flight_orientation = 4.0
 
-            pen_theta_no0 = -2.0
-
-
-            action_rate = -0.04
+            action_rate = -0.01
             # dof_acc = -2.5e-7
             torques = -0.00005
             # action_smooth = -0.1
             # pen_linx_inflight = -0.4
-            orientation = -25.0
-            ang_vel_xy = -0.1
-            nominal_state = -1.0
+            orientation = -30.0
+            ang_vel_xy = -0.10
+            nominal_state = -0.2
+            pen_theta_no0 = -0.5
 
-            collision = -1.0
+            collision = -0.2
 
         only_positive_rewards = False  # if true negative total rewards are clipped at zero (avoids early termination problems)
-        clip_single_reward = 2.5
+        clip_single_reward = 5.0
+        # Jump event terms need a larger per-step range; otherwise takeoff,
+        # flight and landing events are all compressed to the same tiny value.
+        jump_clip_single_reward = 50.0
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
+        jump_height_target = 0.08
+        jump_min_height = 0.04
+        jump_min_air_time = 0.08
+        jump_takeoff_vz = 0.10
+        jump_tuck_target = 0.09
+        jump_init_vx_min = -2.1
+        jump_init_vx_max = 2.1
+        reset_on_jump_success = False
+        landing_buffer_time = 0.40
+        landing_initial_l0 = 0.26
         soft_dof_pos_limit = (
             0.97  # percentage of urdf limits, values above this limit are penalized
         )

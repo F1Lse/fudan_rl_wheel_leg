@@ -68,8 +68,20 @@ class WheelLeggedCfg(LeggedRobotCfg):
         # Match the STM32 low-level controller used for deployment. The leg
         # gains act on the serial-equivalent virtual joints; wheel damping is
         # the velocity-control gain because wheel stiffness is zero.
-        stiffness = {"f0": 15.0, "f1": 15.0, "wheel": 0.0}
-        damping = {"f0": 1.0, "f1": 1.0, "wheel": 0.1}
+        # Keep the deployment-matched defaults, while allowing a curriculum
+        # stage to change the simulated actuator dynamics without editing the
+        # model code.  A stage still has to be restarted so the gains are
+        # rebuilt consistently for every environment.
+        stiffness = {
+            "f0": _env_float("WLG_LEG_KP", 15.0),
+            "f1": _env_float("WLG_LEG_KP", 15.0),
+            "wheel": 0.0,
+        }
+        damping = {
+            "f0": _env_float("WLG_LEG_KD", 1.0),
+            "f1": _env_float("WLG_LEG_KD", 1.0),
+            "wheel": _env_float("WLG_WHEEL_KD", 0.1),
+        }
 
 
     class asset(LeggedRobotCfg.asset):

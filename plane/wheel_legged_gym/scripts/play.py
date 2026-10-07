@@ -30,11 +30,19 @@ cmd_height = float(os.getenv("WLG_PLAY_HEIGHT", "0.20"))
 PLAY_YAW_RAMP_S = float(os.getenv("WLG_PLAY_YAW_RAMP_S", "0.0"))
 if not math.isfinite(PLAY_YAW_RAMP_S) or PLAY_YAW_RAMP_S < 0:
     raise ValueError("WLG_PLAY_YAW_RAMP_S must be finite and nonnegative")
+PLAY_LIN_RAMP_S = float(os.getenv("WLG_PLAY_LIN_RAMP_S", "0.0"))
+if not math.isfinite(PLAY_LIN_RAMP_S) or PLAY_LIN_RAMP_S < 0:
+    raise ValueError("WLG_PLAY_LIN_RAMP_S must be finite and nonnegative")
 applied_yaw = 0.0
 ramp_start_yaw = 0.0
 ramp_target_yaw = 0.0
 ramp_elapsed_s = 0.0
+applied_lin_vel = cmd_x
+lin_ramp_start = cmd_x
+lin_ramp_target = cmd_x
+lin_ramp_elapsed_s = 0.0
 running = True
+reset_requested = False
 turn_left_pressed = False
 turn_right_pressed = False
 hud_enabled = os.getenv("WLG_PLAY_HUD", "0").strip().lower() in (
@@ -76,6 +84,7 @@ def update_yaw_cmd():
 
 def on_press(key):
     global cmd_x, ang_vel, cmd_height, running
+    global reset_requested
     global turn_left_pressed, turn_right_pressed
     global hud_enabled, hud_toggle_pressed
 
@@ -93,7 +102,10 @@ def on_press(key):
         running = False
         print("[CMD] quit (q)")
         return False
-    if k == "w":
+    if k == "r":
+        reset_requested = True
+        print("[CMD] reset environment")
+    elif k == "w":
         cmd_x = LIN_VEL_CMD
         print(f"[CMD] forward: x={cmd_x:.2f}")
     elif k == "s":
@@ -148,6 +160,7 @@ def on_release(key):
 def apply_manual_commands(env, env_cfg, advance_yaw=True):
     global cmd_x, ang_vel, cmd_height
     global applied_yaw, ramp_start_yaw, ramp_target_yaw, ramp_elapsed_s
+    global applied_lin_vel, lin_ramp_start, lin_ramp_target, lin_ramp_elapsed_s
 
     cmd_x = float(
         np.clip(
@@ -171,6 +184,24 @@ def apply_manual_commands(env, env_cfg, advance_yaw=True):
         )
     )
 
+    if PLAY_LIN_RAMP_S == 0.0:
+        applied_lin_vel = cmd_x
+        lin_ramp_target = cmd_x
+    else:
+        if cmd_x != lin_ramp_target:
+            lin_ramp_start = applied_lin_vel
+            lin_ramp_target = cmd_x
+            lin_ramp_elapsed_s = 0.0
+        if advance_yaw:
+            lin_ramp_elapsed_s = min(
+                lin_ramp_elapsed_s + env.dt, PLAY_LIN_RAMP_S
+            )
+            fraction = lin_ramp_elapsed_s / PLAY_LIN_RAMP_S
+            applied_lin_vel = (
+                lin_ramp_start
+                + (lin_ramp_target - lin_ramp_start) * fraction
+            )
+
     if PLAY_YAW_RAMP_S == 0.0:
         applied_yaw = ang_vel
         ramp_target_yaw = ang_vel
@@ -190,7 +221,7 @@ def apply_manual_commands(env, env_cfg, advance_yaw=True):
 
     jump_ids = getattr(env, "jump_ramp_idx", None)
     if jump_ids is None or len(jump_ids) == 0:
-        env.commands[:, 0] = cmd_x
+        env.commands[:, 0] = applied_lin_vel
         env.commands[:, 1] = applied_yaw
         return
 
@@ -198,7 +229,7 @@ def apply_manual_commands(env, env_cfg, advance_yaw=True):
     manual_mask[jump_ids] = False
     manual_ids = manual_mask.nonzero(as_tuple=False).flatten()
     if len(manual_ids) != 0:
-        env.commands[manual_ids, 0] = cmd_x
+        env.commands[manual_ids, 0] = applied_lin_vel
         env.commands[manual_ids, 1] = applied_yaw
 
     env.commands[jump_ids, 0] = env_cfg.commands.jump_ramp_lin_vel_x
@@ -303,7 +334,7 @@ def draw_play_hud(env, env_idx, left_wheel_idx, right_wheel_idx):
 
 
 def play(args):
-    global running
+    global running, reset_requested
 
     print("\n====== Keyboard Control Mode (NO Enter) ======")
     print("w      : forward")
@@ -311,6 +342,7 @@ def play(args):
     print("a      : hold to turn left")
     print("d      : hold to turn right")
     print("e      : stop")
+    print("r      : reset focused environment")
     print("x      : height up")
     print("c      : height down")
     print("h      : toggle live HUD")
@@ -318,6 +350,7 @@ def play(args):
     print("camera : HUD follow view" if hud_enabled else "camera : fixed overview")
     print(f"initial command: vx={cmd_x:.2f}, yaw={ang_vel:.2f}, h={cmd_height:.2f}")
     print(f"yaw command ramp: {PLAY_YAW_RAMP_S:.2f} s")
+    print(f"linear command ramp: {PLAY_LIN_RAMP_S:.2f} s")
     print(f"live HUD: {'on' if hud_enabled else 'off'}")
     print("=============================================\n")
 
@@ -366,6 +399,8 @@ def play(args):
         "custom_drop": "custom_curb_drop_idx",
         "reverse_climb": "custom_reverse_climb_idx",
         "pyramid_climb": "stair_up_idx",
+        "smooth_slope": "smooth_slope_idx",
+        "rough_slope": "rough_slope_idx",
     }.get(focus_terrain)
     custom_ids = getattr(env, focus_attr, None) if focus_attr is not None else None
     has_selected_focus = custom_ids is not None and len(custom_ids) != 0
@@ -412,6 +447,14 @@ def play(args):
     hud_was_drawn = False
     try:
         while running and i < 100000:
+            if reset_requested:
+                reset_requested = False
+                env.reset_idx(torch.tensor([focus_env_idx], device=env.device, dtype=torch.long))
+                obs, obs_history = env.get_observations()
+                apply_manual_commands(env, env_cfg, advance_yaw=False)
+                hud_was_drawn = False
+                print(f"[RESET] env={focus_env_idx}")
+                continue
             apply_manual_commands(env, env_cfg, advance_yaw=True)
             if is_sequence_policy:
                 actions, _ = policy(obs, obs_history)
@@ -430,6 +473,8 @@ def play(args):
                     hud_was_drawn = False
 
             if i % 50 == 0:
+                actual_vx = env.base_lin_vel[focus_env_idx, 0].item()
+                actual_vy = env.base_lin_vel[focus_env_idx, 1].item()
                 vz = env.root_states[focus_env_idx, 9].item()
                 yaw_rate = env.base_ang_vel[focus_env_idx, 2].item()
                 gx, gy, gz = env.projected_gravity[focus_env_idx].tolist()
@@ -439,8 +484,10 @@ def play(args):
                 # left_F = env.vmc_F[0, 0].item()
                 # right_F = env.vmc_F[0, 1].item()
                 print(
-                    f"[{i}] env={focus_env_idx}, vz={vz:.3f}, "
+                    f"[{i}] env={focus_env_idx}, "
                     f"cmd_x={env.commands[focus_env_idx, 0].item():.2f}, "
+                    f"actual_vx={actual_vx:.2f}, actual_vy={actual_vy:.2f}, "
+                    f"vz={vz:.3f}, "
                     f"cmd_yaw={env.commands[focus_env_idx, 1].item():.3f}, "
                     f"real_yaw={yaw_rate:.3f}, "
                     f"h_cmd={env.commands[focus_env_idx, 2].item():.3f}, "

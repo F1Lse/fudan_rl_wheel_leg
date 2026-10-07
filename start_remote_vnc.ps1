@@ -1,4 +1,4 @@
-﻿param(
+param(
     [int]$LocalPort = 5901,
     [int]$RemotePort = 5901,
     [switch]$NoViewer
@@ -6,69 +6,91 @@
 
 $ErrorActionPreference = "Stop"
 $sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
-$hostName = "183.147.142.40"
-$sshPort = 30248
-$userName = "root"
+$configPath = Join-Path $PSScriptRoot ".remote_vnc_ssh.xml"
 
-$viewerCandidates = @(
-    "C:\Program Files\TurboVNC\bin\vncviewer.exe",
-    "C:\Program Files\TurboVNC\vncviewer.exe",
-    "C:\Program Files (x86)\TurboVNC\bin\vncviewer.exe",
-    "C:\Program Files (x86)\TurboVNC\vncviewer.exe"
-)
+function Read-SshCommand {
+    $text = (Read-Host "Enter latest SSH command (example: ssh -p 30704 root@183.147.142.40)").Trim()
+    $text = $text -replace '\\@', '@'
+    $match = [regex]::Match($text, '(?i)(?:ssh(?:\.exe)?\s+)?(?:-p\s+([0-9]+)\s+)?([^@\s]+)@([^\s]+)')
+    if (-not $match.Success) { throw "Could not parse SSH command." }
+    $port = if ($match.Groups[1].Success) { [int]$match.Groups[1].Value } else { 22 }
+    return [pscustomobject]@{ Host = $match.Groups[3].Value; Port = $port; User = $match.Groups[2].Value }
+}
+
+function Read-SshPassword { return (Read-Host "Enter SSH password (hidden)" -AsSecureString) }
+
+function Save-SshConfig($target, [securestring]$password) {
+    [pscustomobject]@{ Host = $target.Host; Port = $target.Port; User = $target.User; Password = $password | ConvertFrom-SecureString } | Export-Clixml -LiteralPath $configPath
+}
+
+function Load-SshConfig {
+    if (-not (Test-Path -LiteralPath $configPath)) { return $null }
+    try {
+        $saved = Import-Clixml -LiteralPath $configPath
+        if ($saved.Host -and $saved.Port -and $saved.User -and $saved.Password) {
+            return [pscustomobject]@{ Host = [string]$saved.Host; Port = [int]$saved.Port; User = [string]$saved.User; Password = ConvertTo-SecureString $saved.Password }
+        }
+    } catch { }
+    return $null
+}
+
+function Enable-SshAskPass([securestring]$password) {
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+    try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+    $env:REMOTE_VNC_SSH_PASSWORD = $plain
+    $askPass = Join-Path $env:TEMP "codex_remote_vnc_askpass.cmd"
+    $askPassContent = @'
+@echo off
+powershell.exe -NoProfile -Command "[Console]::Write($env:REMOTE_VNC_SSH_PASSWORD)"
+'@
+    Set-Content -LiteralPath $askPass -Encoding ASCII -Value $askPassContent
+    $env:SSH_ASKPASS = $askPass
+    $env:SSH_ASKPASS_REQUIRE = "force"
+    $env:DISPLAY = "codex-askpass"
+}
+
+function Invoke-RemoteCheck($target, [securestring]$password, $script) {
+    Enable-SshAskPass $password
+    & $sshExe -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o PreferredAuthentications=password -o PubkeyAuthentication=no -p $target.Port ("{0}@{1}" -f $target.User, $target.Host) $script
+    return ($LASTEXITCODE -eq 0)
+}
+
+$target = Load-SshConfig
+$password = if ($target) { $target.Password } else { $null }
+$viewerCandidates = @("C:\Program Files\TurboVNC\bin\vncviewer.exe", "C:\Program Files\TurboVNC\vncviewer.exe", "C:\Program Files (x86)\TurboVNC\bin\vncviewer.exe", "C:\Program Files (x86)\TurboVNC\vncviewer.exe")
 $viewerPath = $viewerCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-
 $forward = "{0}:127.0.0.1:{1}" -f $LocalPort, $RemotePort
 $remoteCheck = @'
 set -e
-if ss -ltn 2>/dev/null | grep -q ":5901"; then
-  echo VNC_OK
-else
-  echo VNC_NOT_LISTENING
-  vncserver -kill :1 >/tmp/codex_vnc_kill.log 2>&1 || true
-  rm -f /tmp/.X11-unix/X1 /root/.vnc/*.pid
-  vncserver :1 -geometry 1920x1080 -depth 24
-  sleep 2
-  ss -ltn 2>/dev/null | grep -q ":5901"
-  echo VNC_STARTED
-fi
+echo VNC_RESTARTING
+vncserver -kill :1 >/tmp/codex_vnc_kill.log 2>&1 || true
+rm -f /tmp/.X11-unix/X1 /tmp/.X1-lock /root/.vnc/*.pid
+vncserver :1 -geometry 1904x967 -depth 24 >/tmp/codex_vnc_start.log 2>&1
+sleep 2
+ss -ltn 2>/dev/null | grep -q ":5901"
+echo VNC_READY
 '@
 
-Write-Host "检查远端 VNC（第一次 SSH 密码提示）..."
-& $sshExe -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p $sshPort ("{0}@{1}" -f $userName, $hostName) $remoteCheck
-if ($LASTEXITCODE -ne 0) {
-    throw "远端 VNC 检查或启动失败，未建立本地隧道。"
+$connected = $false
+if ($target -and $password) {
+    Write-Host ("Using saved SSH: ssh -p {0} {1}@{2}" -f $target.Port, $target.User, $target.Host)
+    $connected = Invoke-RemoteCheck $target $password $remoteCheck
+}
+if (-not $connected) {
+    Write-Host "Saved SSH failed. Enter the latest connection information."
+    $target = Read-SshCommand
+    $password = Read-SshPassword
+    if (-not (Invoke-RemoteCheck $target $password $remoteCheck)) { throw "SSH or remote VNC check failed." }
+    Save-SshConfig $target $password
+    Write-Host ("SSH config saved with Windows encryption: {0}" -f $configPath)
 }
 
-$sshArgs = @(
-    "-N",
-    "-T",
-    "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "ExitOnForwardFailure=yes",
-    "-o", "ServerAliveInterval=30",
-    "-p", "$sshPort",
-    "-L", $forward,
-    ("{0}@{1}" -f $userName, $hostName)
-)
-
-Write-Host ("SSH tunnel: 127.0.0.1:{0} -> {1}:{2}" -f $LocalPort, $hostName, $RemotePort)
-Write-Host "远端 VNC 已确认，下面建立 SSH 隧道（第二次 SSH 密码提示）。"
-
-if (-not $NoViewer -and $viewerPath) {
-    Start-Process -FilePath $viewerPath -ArgumentList ("127.0.0.1:{0}" -f $LocalPort)
-    Write-Host ("已打开 TurboVNC：127.0.0.1:{0}" -f $LocalPort)
-} elseif (-not $viewerPath) {
-    Write-Host ("未找到 TurboVNC Viewer。请手动打开 TurboVNC，连接 127.0.0.1:{0}。" -f $LocalPort)
-}
-
-Write-Host "SSH 隧道保持在当前窗口。输入密码后不要关闭此窗口。"
-Write-Host "按 Ctrl+C 可停止本地 SSH 隧道。"
-
+$sshArgs = @("-N", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-p", "$($target.Port)", "-L", $forward, ("{0}@{1}" -f $target.User, $target.Host))
+Write-Host ("SSH tunnel: 127.0.0.1:{0} -> {1}:{2}" -f $LocalPort, $target.Host, $RemotePort)
+if (-not $NoViewer -and $viewerPath) { Start-Process -FilePath $viewerPath -ArgumentList ("127.0.0.1:{0}" -f $LocalPort); Write-Host ("TurboVNC started: 127.0.0.1:{0}" -f $LocalPort) }
+elseif (-not $viewerPath) { Write-Host ("TurboVNC not found. Connect manually to 127.0.0.1:{0}" -f $LocalPort) }
+Write-Host "SSH tunnel is running. Press Ctrl+C to stop."
+Enable-SshAskPass $password
 $sshProcess = Start-Process -FilePath $sshExe -ArgumentList $sshArgs -PassThru -NoNewWindow
 $sshProcess.WaitForExit()
-
-if ($sshProcess.ExitCode -ne 0) {
-    Write-Host ("SSH 隧道已退出，代码：{0}" -f $sshProcess.ExitCode)
-} else {
-    Write-Host "SSH 隧道已结束。"
-}
+Write-Host ("SSH tunnel ended, exit code: {0}" -f $sshProcess.ExitCode)

@@ -22,17 +22,18 @@ except ImportError:
 # --------------------
 # Global command state
 # --------------------
-cmd_x = 0.0
+cmd_x = float(os.getenv("WLG_PLAY_SPEED", "0.0"))
 ang_vel = 0.0
 cmd_height = 0.2
 running = True
+reset_requested = False
 turn_left_pressed = False
 turn_right_pressed = False
 
 YAW_STEP = 1.0
 
 # Camera follow
-ENABLE_CAMERA_FOLLOW = True
+ENABLE_CAMERA_FOLLOW = bool(int(os.getenv("WLG_PLAY_CAMERA_FOLLOW", "0")))
 CAMERA_DISTANCE = 2.2
 CAMERA_HEIGHT = 1.0
 CAMERA_LOOK_AT_HEIGHT = 0.35
@@ -52,7 +53,7 @@ def update_yaw_cmd():
 
 
 def on_press(key):
-    global cmd_x, ang_vel, cmd_height, running
+    global cmd_x, ang_vel, cmd_height, running, reset_requested
     global turn_left_pressed, turn_right_pressed
 
     if key == keyboard.Key.esc:
@@ -65,10 +66,28 @@ def on_press(key):
     except Exception:
         return
 
+    speed_keys = {
+        "1": -1.5,
+        "2": -1.0,
+        "3": -0.5,
+        "4": 0.0,
+        "5": 0.5,
+        "6": 1.0,
+        "7": 1.5,
+    }
+    if k in speed_keys:
+        cmd_x = speed_keys[k]
+        print(f"[CMD] linear speed {cmd_x:+.1f} m/s")
+        return
+
     if k == "q":
         running = False
         print("[CMD] quit (q)")
         return False
+    if k == "r":
+        reset_requested = True
+        print("[CMD] reset requested")
+        return
     if k == "w":
         cmd_x = -2.5
         print("[CMD] forward")
@@ -178,7 +197,7 @@ def update_follow_camera(env, camera_pos):
 
 
 def play(args):
-    global running
+    global running, reset_requested
 
     print("\n====== Keyboard Control Mode (NO Enter) ======")
     print("w      : forward")
@@ -188,8 +207,10 @@ def play(args):
     print("e      : stop turning")
     print("x      : height up")
     print("c      : height down")
+    print("r      : reset robot")
     print("q/ESC  : quit")
     print("camera : follow robot (third-person)")
+    print(f"initial speed: {cmd_x:+.2f} m/s (set WLG_PLAY_SPEED to override)")
     print("=============================================\n")
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
@@ -227,18 +248,35 @@ def play(args):
 
     i = 0
     camera_pos = None
+    reset_requested = False
     try:
         while running and i < 100000:
+            if reset_requested:
+                reset_requested = False
+                env.reset()
+                obs, obs_history = env.get_observations()
+                camera_pos = None
+                print("[CMD] robot reset")
+
+            # Apply keyboard commands before inference so the current command
+            # is included in the observation used for this action.
+            apply_manual_commands(env, env_cfg)
+
             if is_sequence_policy:
                 actions, _ = policy(obs, obs_history)
             else:
                 actions = policy(obs)
 
-            apply_manual_commands(env, env_cfg)
             obs, _, _, _, _, obs_history = env.step(actions)
             camera_pos = update_follow_camera(env, camera_pos)
-            # print(env.was_in_flight)
-            print(env.feet_indices)
+            if i % 50 == 0:
+                actual_vx = env.base_lin_vel[0, 0].item()
+                print(
+                    f"[STATE] cmd_x={cmd_x:+.2f} m/s, "
+                    f"actual_vx={actual_vx:+.2f} m/s, "
+                    f"vz={env.root_states[0, 9].item():+.2f}"
+                )
+            # Keep the terminal quiet during visualization.
             # if i % 50 == 0:
                 # vz = env.root_states[0, 9].item()
                 # yaw_rate = env.base_ang_vel[0, 2].item()
